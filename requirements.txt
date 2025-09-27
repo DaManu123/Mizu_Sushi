@@ -1,0 +1,41 @@
+# Dependencias del Sistema de Gestión de Restaurante Sushi
+# Instalar con: pip install -r requirements.txt
+
+# Librería para generación de PDFs
+reportlab>=3.6.0
+
+# Librería para manejo de fechas y horarios (incluida en Python standard library)
+# datetime
+
+# Tkinter viene incluido con Python por defecto
+# tkinter
+
+# Librería para manejo de JSON (incluida en Python standard library)
+# json
+
+# Dependencias opcionales para funcionalidades avanzadas
+# Descomenta las siguientes líneas si planeas agregar estas funcionalidades:
+
+# Para gráficos avanzados:
+# matplotlib>=3.5.0
+# numpy>=1.21.0
+
+# Para base de datos (alternativa a JSON):
+# sqlite3  # Incluido en Python standard library
+
+# Para interfaz web (futuras versiones):
+# flask>=2.0.0
+# flask-login>=0.6.0
+
+# Para análisis de datos avanzado:
+# pandas>=1.3.0
+
+# Para encriptación de datos:
+# cryptography>=3.4.0
+
+# Para logging avanzado:
+# logging  # Incluido en Python standard library
+
+# Para testing:
+# pytest>=6.0.0
+# pytest-cov>=2.12.0

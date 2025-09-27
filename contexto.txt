@@ -1,0 +1,78 @@
+Contexto del Programa en Python
+
+Este programa es una aplicación de escritorio con interfaz gráfica desarrollada en Python utilizando Tkinter como biblioteca principal para la construcción de la interfaz. Además, se incluye soporte opcional para el uso de imágenes mediante la librería PIL (Pillow).
+
+El objetivo principal es crear la base estructural de un sistema con login (inicio de sesión), que posteriormente pueda ampliarse con menús, pantallas adicionales y más funcionalidades.
+
+1. Pantalla Principal (Login)
+
+La aplicación inicia mostrando una ventana de login.
+
+El usuario puede ingresar correo y contraseña.
+
+Incluye validaciones básicas (ejemplo: evitar campos vacíos).
+
+Botón de "Acceder" que valida las credenciales e informa si el acceso fue exitoso o fallido.
+
+Incluye la estructura de botones para:
+
+Recuperar contraseña.
+
+Crear nueva cuenta.
+(estas funciones están definidas en la interfaz pero todavía no implementadas en la lógica).
+
+2. Diseño Visual
+
+Se utilizan Frames y widgets de Tkinter (Label, Entry, Button, etc.).
+
+El diseño se organiza con grid() para posicionar los elementos de manera ordenada.
+
+Colores, fuentes y estilos son aplicados para darle una apariencia profesional.
+
+En caso de estar disponible PIL, se muestra una imagen de fondo o imágenes en la interfaz.
+
+3. Arquitectura del Código
+
+El programa está organizado de manera que permite fácil mantenimiento y escalabilidad.
+
+Separación de secciones:
+
+Configuración inicial: ventana principal, estilos y tamaño.
+
+Login: etiquetas, campos y botones.
+
+Eventos: funciones que responden a las acciones de los botones (ej. validar credenciales).
+
+La lógica de validación actualmente es básica y local (no conectada a base de datos).
+
+Está preparado para agregar nuevas ventanas o menús después del login (ejemplo: dashboard principal).
+
+4. Propósito Académico y Práctico
+
+El programa no solo busca ser un login simple, sino también la base de una aplicación completa.
+
+Puede evolucionar hacia un sistema de:
+
+Gestión de usuarios.
+
+App de puntos o recompensas.
+
+Sistema de ventas o inventarios.
+
+Herramienta de administración interna.
+
+Es un esqueleto funcional para que otro programador (el asistente de código) pueda extenderlo con facilidad.
+
+5. Próximos Pasos
+
+Implementar validaciones avanzadas (formato correcto de correo, seguridad de contraseñas).
+
+Conectar el login a una base de datos o archivo de usuarios.
+
+Crear una pantalla principal (dashboard) que se muestre tras el login exitoso.
+
+Implementar la lógica de los botones "Recuperar contraseña" y "Crear cuenta".
+
+Modularizar el código para que cada parte (ventanas, lógica, estilos) esté en archivos separados.
+
+Integrar imágenes, iconos y personalización visual avanzada.
