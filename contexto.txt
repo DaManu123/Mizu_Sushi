@@ -1,78 +1,160 @@
-Contexto del Programa en Python
+Contexto del Sistema Mizu Sushi Bar - Aplicación de Gestión Completa
 
-Este programa es una aplicación de escritorio con interfaz gráfica desarrollada en Python utilizando Tkinter como biblioteca principal para la construcción de la interfaz. Además, se incluye soporte opcional para el uso de imágenes mediante la librería PIL (Pillow).
+Este programa es una aplicación de escritorio integral desarrollada en Python utilizando Tkinter como biblioteca principal para la interfaz gráfica, SQLite para la gestión de datos, y librerías adicionales como PIL (Pillow) para imágenes y ReportLab para generación de PDFs.
 
-El objetivo principal es crear la base estructural de un sistema con login (inicio de sesión), que posteriormente pueda ampliarse con menús, pantallas adicionales y más funcionalidades.
+El sistema ha evolucionado desde una simple pantalla de login hasta convertirse en una aplicación completa de gestión para un restaurante de sushi, con funcionalidades diferenciadas por roles de usuario y un sistema robusto de base de datos.
 
-1. Pantalla Principal (Login)
+## 1. SISTEMA DE AUTENTICACIÓN Y USUARIOS
 
-La aplicación inicia mostrando una ventana de login.
+### Pantalla de Login:
+- Sistema de autenticación completo conectado a base de datos SQLite
+- Validación de usuarios con contraseñas hasheadas (SHA-256)
+- Acceso rápido por roles (Cliente, Cajero, Administrador) 
+- Usuarios por defecto creados automáticamente al inicializar la BD
+- Gestión completa de sesiones de usuario
 
-El usuario puede ingresar correo y contraseña.
+### Gestión de Usuarios (Admin):
+- CRUD completo de usuarios (Crear, Leer, Actualizar, Eliminar)
+- Roles diferenciados: Cliente, Cajero, Administrador
+- Cambio de contraseñas con validaciones de seguridad
+- Activación/desactivación de usuarios
+- Historial de login y timestamps
 
-Incluye validaciones básicas (ejemplo: evitar campos vacíos).
+## 2. BASE DE DATOS SQLITE COMPLETA
 
-Botón de "Acceder" que valida las credenciales e informa si el acceso fue exitoso o fallido.
+### Estructura de Tablas Implementadas:
+- **products**: Gestión completa del menú con categorías, stock, precios
+- **offers**: Sistema de ofertas con tipos, descuentos, fechas de validez
+- **cart**: Carrito temporal para pedidos en proceso
+- **orders**: Historial completo de pedidos/ventas
+- **users**: Gestión de usuarios con roles y autenticación
+- **categories**: Categorización de productos del menú
 
-Incluye la estructura de botones para:
+### Funciones de Base de Datos (db.py):
+- Inicialización automática con datos de ejemplo
+- Migraciones automáticas para nuevas columnas
+- Funciones CRUD para todas las entidades
+- Gestión de stock con actualizaciones automáticas
+- Sistema de backup y restauración
 
-Recuperar contraseña.
+## 3. FUNCIONALIDADES POR ROL DE USUARIO
 
-Crear nueva cuenta.
-(estas funciones están definidas en la interfaz pero todavía no implementadas en la lógica).
+### CLIENTE:
+- **Menú Interactivo**: Visualización completa del menú con categorías, filtros y búsqueda
+- **Carrito de Compras**: Agregar/quitar productos, modificar cantidades, aplicar ofertas
+- **Ofertas Activas**: Visualización de promociones vigentes con aplicación automática
+- **Historial de Pedidos**: Ver pedidos anteriores con detalles completos
 
-2. Diseño Visual
+### CAJERO:
+- **Registro de Pedidos**: Tomar pedidos para clientes presenciales
+- **Gestión de Pedidos Activos**: Ver y actualizar estados (En preparación, Listo, Completado, Cancelado)
+- **Cobro y Facturación**: Procesar pagos (efectivo, tarjeta) con generación de tickets
+- **Cancelación de Pedidos**: Gestión de cancelaciones con actualización de stock
 
-Se utilizan Frames y widgets de Tkinter (Label, Entry, Button, etc.).
+### ADMINISTRADOR:
+- **Gestión de Productos**: CRUD completo con categorías, stock, precios, estados
+- **Gestión de Ofertas**: Crear promociones por porcentaje o 2x1, con fechas de vigencia
+- **Gestión de Usuarios**: Administración completa de cuentas y roles
+- **Reportes Avanzados**: Estadísticas de ventas, productos más vendidos, análisis temporal
+- **Configuración del Sistema**: Temas, respaldos, configuraciones generales
 
-El diseño se organiza con grid() para posicionar los elementos de manera ordenada.
+## 4. SISTEMA DE REPORTES Y ANÁLISIS
 
-Colores, fuentes y estilos son aplicados para darle una apariencia profesional.
+### Reportes Implementados:
+- **Resumen de Ventas**: Análisis por períodos con métricas clave
+- **Productos Más Vendidos**: Ranking con gráficos de barras
+- **Análisis Temporal**: Comparativas entre períodos
+- **Gestión de Stock**: Alertas de productos con bajo inventario
+- **Exportación PDF**: Reportes profesionales con gráficos integrados
 
-En caso de estar disponible PIL, se muestra una imagen de fondo o imágenes en la interfaz.
+### Análisis Inteligente:
+- Detección automática de productos con bajo stock
+- Análisis de tendencias de ventas
+- Ofertas más utilizadas
+- Patrones de compra por períodos
 
-3. Arquitectura del Código
+## 5. DISEÑO Y EXPERIENCIA DE USUARIO
 
-El programa está organizado de manera que permite fácil mantenimiento y escalabilidad.
+### Sistema de Temas:
+- **Tema Claro**: Colores suaves inspirados en sushi (beige, verdes, rojos)
+- **Tema Oscuro**: Diseño moderno para uso nocturno
+- **Tema Automático**: Cambio según la hora del día (6AM-6PM claro, 6PM-6AM oscuro)
 
-Separación de secciones:
+### Interfaz Responsiva:
+- Adaptación automática al tamaño de ventana
+- Botones y elementos que se ajustan dinámicamente
+- Imágenes de fondo adaptables con transparencia configurable
 
-Configuración inicial: ventana principal, estilos y tamaño.
+### Accesibilidad:
+- Atajos de teclado para cambio rápido de roles (F1, F2, F3)
+- Atajos para temas (F9, F10, F11)
+- Notificaciones visuales de cambios de estado
+- Tooltips y ayudas contextuales
 
-Login: etiquetas, campos y botones.
+## 6. FUNCIONALIDADES AVANZADAS IMPLEMENTADAS
 
-Eventos: funciones que responden a las acciones de los botones (ej. validar credenciales).
+### Sistema de Ofertas:
+- Ofertas por porcentaje de descuento
+- Ofertas 2x1 con productos específicos
+- Validación de fechas de vigencia
+- Aplicación automática en el carrito
 
-La lógica de validación actualmente es básica y local (no conectada a base de datos).
+### Gestión de Stock:
+- Actualización automática con cada venta
+- Alertas de stock bajo
+- Control de disponibilidad en tiempo real
 
-Está preparado para agregar nuevas ventanas o menús después del login (ejemplo: dashboard principal).
+### Sistema de Tickets:
+- Generación automática de tickets de venta
+- Guardado en carpeta específica
+- Formato detallado con información completa
 
-4. Propósito Académico y Práctico
+### Sincronización de Datos:
+- Actualización automática entre ventanas
+- Sincronización de carrito en tiempo real
+- Refresh automático de datos cada 30 segundos
 
-El programa no solo busca ser un login simple, sino también la base de una aplicación completa.
+## 7. ARQUITECTURA TÉCNICA
 
-Puede evolucionar hacia un sistema de:
+### Estructura Modular:
+- **sushi_app.py**: Interfaz principal con todas las vistas
+- **db.py**: Capa de acceso a datos con todas las operaciones CRUD
+- **mizu_sushi.db**: Base de datos SQLite con datos persistentes
+- **tickets/**: Carpeta para almacenar tickets generados
 
-Gestión de usuarios.
+### Librerías Integradas:
+- **Tkinter/TTK**: Interfaz gráfica con estilos personalizados
+- **SQLite3**: Base de datos local sin necesidad de servidor
+- **PIL/Pillow**: Manejo de imágenes y fondos adaptativos
+- **ReportLab**: Generación de PDFs profesionales con gráficos
+- **Hashlib**: Seguridad en contraseñas con hash SHA-256
+- **JSON**: Serialización de datos complejos
+- **Datetime**: Manejo completo de fechas y timestamps
 
-App de puntos o recompensas.
+## 8. ESTADO ACTUAL Y FUNCIONALIDADES COMPLETADAS
 
-Sistema de ventas o inventarios.
+✅ **Completado**:
+- Sistema de autenticación con base de datos
+- Gestión completa de productos, ofertas y usuarios
+- Carrito de compras funcional con ofertas
+- Sistema de pedidos y facturación
+- Reportes avanzados con exportación PDF
+- Temas dinámicos y interfaz responsiva
+- Backup y restauración de datos
+- Sistema de roles con permisos diferenciados
 
-Herramienta de administración interna.
+## 9. ÁREAS PENDIENTES DE PERFECCIONAMIENTO
 
-Es un esqueleto funcional para que otro programador (el asistente de código) pueda extenderlo con facilidad.
+🔧 **Por Optimizar**:
+- Validaciones más estrictas en formularios de entrada
+- Sistema de notificaciones push para pedidos
+- Integración con sistemas de pago externos
+- Optimización de rendimiento para grandes volúmenes de datos
+- Sistema de inventario con proveedores
+- Módulo de empleados con horarios y turnos
+- Dashboard con métricas en tiempo real
+- Sistema de reservas de mesas
+- Integración con impresoras térmicas para tickets
+- API REST para integración con apps móviles
 
-5. Próximos Pasos
-
-Implementar validaciones avanzadas (formato correcto de correo, seguridad de contraseñas).
-
-Conectar el login a una base de datos o archivo de usuarios.
-
-Crear una pantalla principal (dashboard) que se muestre tras el login exitoso.
-
-Implementar la lógica de los botones "Recuperar contraseña" y "Crear cuenta".
-
-Modularizar el código para que cada parte (ventanas, lógica, estilos) esté en archivos separados.
-
-Integrar imágenes, iconos y personalización visual avanzada.
+El sistema ha evolucionado de un simple login a una aplicación completa de gestión restaurantera, manteniendo un código limpio, modular y escalable que permite futuras expansiones y mejoras.
