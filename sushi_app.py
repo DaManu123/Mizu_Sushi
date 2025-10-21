@@ -3710,6 +3710,17 @@ Ctrl+R: Selector de Roles"""
         else:
             entry_nombre.focus()
 
+    def actualizar_datos_reportes_seguro(self):
+        """Actualiza los datos de reportes de manera segura"""
+        try:
+            # Mostrar los reportes actualizados desde cero
+            self.mostrar_reportes()
+            
+            # Mostrar mensaje de éxito
+            messagebox.showinfo("Éxito", "Datos de reportes actualizados correctamente")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al actualizar datos: {str(e)}")
+
     def mostrar_reportes(self):
         """Sistema avanzado de reportes de ventas - TOTALMENTE INTEGRADO CON BASE DE DATOS"""
         self.marcar_ventana_actual("reportes")
@@ -3848,7 +3859,7 @@ Ctrl+R: Selector de Roles"""
                  padx=20, pady=6).pack(side="left", padx=(0, 10))
         
         tk.Button(buttons_row, text="🔄 Actualizar BD",
-                 command=self.actualizar_datos_reportes_completos,
+                 command=self.actualizar_datos_reportes_seguro,
                  bg="#4CAF50", fg="white", font=("Arial", 10, "bold"),
                  padx=20, pady=6).pack(side="left", padx=(0, 10))
         
@@ -3944,12 +3955,20 @@ Ctrl+R: Selector de Roles"""
                                      fg=self.color_titulo, relief="ridge", bd=2, padx=15, pady=15)
         metricas_frame.pack(fill="x", pady=(0, 20))
         
+        # Frame separado para el botón de actualización
+        actualizar_frame = tk.Frame(metricas_frame, bg=self.color_fondo_ventana)
+        actualizar_frame.pack(fill="x", pady=(0, 10))
+        
         # Botón de actualización de datos
-        actualizar_btn = tk.Button(metricas_frame, text="🔄 Actualizar desde BD", 
-                                  command=self.actualizar_datos_reportes,
+        actualizar_btn = tk.Button(actualizar_frame, text="🔄 Actualizar desde BD", 
+                                  command=self.actualizar_datos_reportes_seguro,
                                   bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"),
                                   relief="raised", bd=2, padx=15, pady=5)
-        actualizar_btn.pack(anchor="ne", pady=(0, 10))
+        actualizar_btn.pack(side="right")
+        
+        # Frame separado para las métricas con grid
+        metricas_container = tk.Frame(metricas_frame, bg=self.color_fondo_ventana)
+        metricas_container.pack(fill="x", pady=(5, 0))
         
         # Métricas expandidas con datos completos de BD
         metricas = [
@@ -3967,9 +3986,9 @@ Ctrl+R: Selector de Roles"""
             col = i % 4  # 4 columnas para mejor distribución
             row = i // 4
             
-            metrica_frame = tk.Frame(metricas_frame, bg=color, relief="raised", bd=3)
+            metrica_frame = tk.Frame(metricas_container, bg=color, relief="raised", bd=3)
             metrica_frame.grid(row=row, column=col, padx=5, pady=8, sticky="ew", ipadx=15, ipady=12)
-            metricas_frame.grid_columnconfigure(col, weight=1)
+            metricas_container.grid_columnconfigure(col, weight=1)
             
             tk.Label(metrica_frame, text=titulo, font=("Helvetica", 9, "bold"), 
                     bg=color, fg="white").pack()
