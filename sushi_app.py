@@ -5,6 +5,7 @@ from tkinter import filedialog
 import datetime
 import json
 import os
+import db
 try:
     from PIL import Image, ImageTk
     PIL_DISPONIBLE = True
@@ -106,103 +107,48 @@ class SushiApp(tk.Tk):
         self.rol_usuario = tk.StringVar(value=ROL_ACTUAL)
         self.fondo_imagen = None
         
-        # Estructura de datos para ofertas
-        self.ofertas = [
-            {
-                "id": "OFF001",
-                "nombre": "2x1 en California Rolls",
-                "descripcion": "Lleva 2 California Rolls por el precio de 1",
-                "tipo": "2x1",
-                "productos_aplicables": ["California Roll"],
-                "descuento": 50,  # 50% descuento = 2x1
-                "activa": True,
-                "fecha_inicio": "2025-09-26",
-                "fecha_fin": "2025-10-15"
-            },
-            {
-                "id": "OFF002", 
-                "nombre": "Combo Sushi Lovers",
-                "descripcion": "15% descuento en pedidos de 3 o más rolls",
-                "tipo": "combo",
-                "productos_aplicables": ["California Roll", "Philadelphia Roll", "Salmon Roll"],
-                "descuento": 15,
-                "cantidad_minima": 3,
-                "activa": True,
-                "fecha_inicio": "2025-09-20",
-                "fecha_fin": "2025-10-31"
-            },
-            {
-                "id": "OFF003",
-                "nombre": "Viernes de Descuento",
-                "descripcion": "20% de descuento todos los viernes",
-                "tipo": "descuento_dia",
-                "productos_aplicables": ["todos"],
-                "descuento": 20,
-                "dia_semana": "viernes",
-                "activa": True,
-                "fecha_inicio": "2025-09-01",
-                "fecha_fin": "2025-12-31"
-            }
-        ]
-        
-        # Sistema de ventas para reportes avanzados
-        self.ventas = [
-            {
-                "id": "VTA001",
-                "fecha": "2025-09-25 14:30:00",
-                "productos": [
-                    {"nombre": "California Roll", "cantidad": 2, "precio_unitario": 120, "subtotal": 240}
-                ],
-                "oferta_aplicada": "OFF001",
-                "descuento_aplicado": 120,  # 50% de 240
-                "total_sin_descuento": 240,
-                "total_final": 120,
-                "metodo_pago": "efectivo",
-                "cajero": "Ana Gomez"
-            },
-            {
-                "id": "VTA002",
-                "fecha": "2025-09-25 16:45:00",
-                "productos": [
-                    {"nombre": "Philadelphia Roll", "cantidad": 1, "precio_unitario": 150, "subtotal": 150},
-                    {"nombre": "Salmon Roll", "cantidad": 2, "precio_unitario": 180, "subtotal": 360}
-                ],
-                "oferta_aplicada": None,
-                "descuento_aplicado": 0,
-                "total_sin_descuento": 510,
-                "total_final": 510,
-                "metodo_pago": "tarjeta",
-                "cajero": "Carlos Ruiz"
-            },
-            {
-                "id": "VTA003",
-                "fecha": "2025-09-26 12:15:00",
-                "productos": [
-                    {"nombre": "California Roll", "cantidad": 3, "precio_unitario": 120, "subtotal": 360},
-                    {"nombre": "Tuna Roll", "cantidad": 1, "precio_unitario": 200, "subtotal": 200}
-                ],
-                "oferta_aplicada": "OFF002",
-                "descuento_aplicado": 84,  # 15% de 560
-                "total_sin_descuento": 560,
-                "total_final": 476,
-                "metodo_pago": "efectivo",
-                "cajero": "Ana Gomez"
-            },
-            {
-                "id": "VTA004",
-                "fecha": "2025-09-26 18:20:00",
-                "productos": [
-                    {"nombre": "Veggie Roll", "cantidad": 2, "precio_unitario": 100, "subtotal": 200},
-                    {"nombre": "Philadelphia Roll", "cantidad": 1, "precio_unitario": 150, "subtotal": 150}
-                ],
-                "oferta_aplicada": None,
-                "descuento_aplicado": 0,
-                "total_sin_descuento": 350,
-                "total_final": 350,
-                "metodo_pago": "tarjeta",
-                "cajero": "Maria Lopez"
-            }
-        ]
+        # Inicializar base de datos y cargar datos persistentes
+        try:
+            db.init_db()
+        except Exception:
+            pass
+
+        # Cargar ofertas desde la base de datos; si no hay datos, inicializar con muestras
+        try:
+            ofertas_db = db.load_offers()
+            if ofertas_db:
+                self.ofertas = ofertas_db
+            else:
+                # muestras por defecto
+                self.ofertas = [
+                    {
+                        "id": "OFF001",
+                        "nombre": "2x1 en California Rolls",
+                        "descripcion": "Lleva 2 California Rolls por el precio de 1",
+                        "tipo": "2x1",
+                        "productos_aplicables": ["California Roll"],
+                        "descuento": 50,
+                        "activa": True,
+                        "fecha_inicio": "2025-09-26",
+                        "fecha_fin": "2025-10-15"
+                    }
+                ]
+        except Exception:
+            self.ofertas = []
+
+        # Variables para sincronización automática
+        self.ventana_actual = None
+        self.sincronizacion_activa = False
+
+        # Cargar ventas (historial) desde la base de datos
+        try:
+            ventas_db = db.load_orders()
+            if ventas_db:
+                self.ventas = ventas_db
+            else:
+                self.ventas = []
+        except Exception:
+            self.ventas = []
         
         self.cargar_imagen_fondo()
         self.configurar_estilos()
@@ -226,6 +172,9 @@ class SushiApp(tk.Tk):
         
         # Configurar evento de redimensionamiento para botones responsivos
         self.bind('<Configure>', self.on_window_resize)
+        
+        # Inicializar sistema de sincronización automática
+        self.iniciar_sincronizacion_automatica()
         
         self.mostrar_login()
     
@@ -751,7 +700,8 @@ class SushiApp(tk.Tk):
             # Asegurar que el fondo esté en el fondo
             fondo_label.lower()
             # Guardar referencia para poder actualizarlo después
-            main_frame.fondo_label = fondo_label
+            # Almacenar referencia para evitar garbage collection
+            self.fondo_label_ref = fondo_label
 
         return main_frame
 
@@ -878,7 +828,6 @@ Ctrl+R: Selector de Roles"""
             crear_boton_menu("🍣 Menú de Sushi", self.mostrar_menu_sushi).pack(pady=tamaños['espaciado_botones'])
             crear_boton_menu("🎁 Ofertas Especiales", self.mostrar_ofertas_cliente, "#FF6F00").pack(pady=tamaños['espaciado_botones'])
             crear_boton_menu("🛒 Carrito de Compras", self.mostrar_carrito).pack(pady=tamaños['espaciado_botones'])
-            crear_boton_menu("📦 Realizar Pedido", self.mostrar_realizar_pedido).pack(pady=tamaños['espaciado_botones'])
             crear_boton_menu("📜 Historial de Pedidos", self.mostrar_historial).pack(pady=tamaños['espaciado_botones'])
 
         elif self.rol_usuario.get() == "cajero":
@@ -939,70 +888,864 @@ Ctrl+R: Selector de Roles"""
     # --- Vistas Cliente ---
     def mostrar_menu_sushi(self):
         frame = self.limpiar_ventana()
-        ttk.Label(frame, text="Nuestro Menú 🍣", style="Titulo.TLabel").pack(pady=(0, 20))
+
+        # Título principal
+        titulo_frame = tk.Frame(frame, bg="#D32F2F", relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+
+        # Botón de regresar rápido en la cabecera
+        btn_regresar = tk.Button(titulo_frame, text="⬅️ Regresar", command=self.mostrar_menu_principal,
+                                 bg=self.color_boton_fondo, fg=self.color_boton_texto,
+                                 font=("Helvetica", 10, "bold"), relief="raised", bd=1, padx=10, pady=6)
+        btn_regresar.pack(side="right", padx=10, pady=8)
+
+        tk.Label(titulo_frame, text="🍣 Nuestro Menú de Sushi 🍣",
+                 font=("Impact", 22, "bold"), bg="#D32F2F", fg="white", pady=15).pack()
+
+        # Cargar y mostrar ofertas activas dinámicamente
+        self.mostrar_ofertas_activas_en_menu(frame)
+
+        # Frame principal para el menú
+        menu_container = tk.Frame(frame, bg=self.color_fondo_ventana)
+        menu_container.pack(expand=True, fill="both", padx=20, pady=(0, 15))
         
-        # Mostrar ofertas activas en el menú
-        ofertas_activas = [o for o in self.ofertas if o.get('activa', False)]
-        if ofertas_activas:
-            ofertas_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
-            ofertas_frame.pack(fill="x", padx=20, pady=(0, 20))
-            
-            tk.Label(ofertas_frame, text="🎁 ¡OFERTAS ESPECIALES! 🎁", 
-                    font=("Helvetica", 14, "bold"), bg=self.color_fondo_ventana, fg=self.color_titulo).pack(pady=10)
-            
-            # Mostrar solo las ofertas más relevantes (máximo 2)
-            for oferta in ofertas_activas[:2]:
-                oferta_text = f"• {oferta['nombre']}: {oferta['descripcion']}"
-                tk.Label(ofertas_frame, text=oferta_text, 
-                        font=("Helvetica", 10), bg=self.color_fondo_ventana, fg=self.color_titulo,
-                        wraplength=700, justify="left").pack(anchor="w", padx=20, pady=2)
-            
-            if len(ofertas_activas) > 2:
-                tk.Label(ofertas_frame, text="Ver más ofertas en la sección Ofertas Especiales", 
-                        font=("Helvetica", 9, "italic"), bg=self.color_fondo_ventana, fg=self.color_texto).pack(pady=(5, 10))
+        # Botones de filtro por categoría
+        filtro_frame = tk.Frame(menu_container, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        filtro_frame.pack(fill="x", pady=(0, 15))
         
-        # Menú principal con precios
-        menu_items = [
-            ("California Roll", "Kanikama, palta, pepino", "$120"),
-            ("Philadelphia Roll", "Salmón, queso Philadelphia, palta", "$150"), 
-            ("Salmon Roll", "Salmón fresco, pepino, wasabi", "$180"),
-            ("Tuna Roll", "Atún rojo, palta, sésamo", "$200"),
-            ("Veggie Roll", "Palta, pepino, zanahoria, lechuga", "$100")
+        tk.Label(filtro_frame, text="🎯 Filtrar por categoría:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).pack(pady=(10, 5))
+        
+        categorias_frame = tk.Frame(filtro_frame, bg=self.color_fondo_ventana)
+        categorias_frame.pack(pady=(0, 10))
+        
+        # Botones de categorías
+        categorias = ["Todos", "Rolls", "Especiales", "Vegetarianos", "Postres"]
+        for categoria in categorias:
+            tk.Button(categorias_frame, text=f"📂 {categoria}", 
+                     command=lambda c=categoria: self.filtrar_productos_por_categoria(c),
+                     bg="#607D8B" if categoria == "Todos" else "#9E9E9E", 
+                     fg="white", font=("Helvetica", 10, "bold"),
+                     relief="raised", bd=2, padx=15, pady=5).pack(side="left", padx=5)
+
+        # Controles adicionales: búsqueda por nombre y rango de precio
+        adv_filters_frame = tk.Frame(filtro_frame, bg=self.color_fondo_ventana)
+        adv_filters_frame.pack(fill="x", padx=10, pady=(5, 10))
+
+        tk.Label(adv_filters_frame, text="🔎 Buscar:", bg=self.color_fondo_ventana).pack(side="left", padx=(0, 6))
+        self.menu_search_var = tk.StringVar()
+        tk.Entry(adv_filters_frame, textvariable=self.menu_search_var, width=30).pack(side="left")
+
+        tk.Label(adv_filters_frame, text="💲 Precio min:", bg=self.color_fondo_ventana).pack(side="left", padx=(10, 6))
+        self.menu_price_min = tk.StringVar()
+        tk.Entry(adv_filters_frame, textvariable=self.menu_price_min, width=8).pack(side="left")
+
+        tk.Label(adv_filters_frame, text="💲 Precio max:", bg=self.color_fondo_ventana).pack(side="left", padx=(10, 6))
+        self.menu_price_max = tk.StringVar()
+        tk.Entry(adv_filters_frame, textvariable=self.menu_price_max, width=8).pack(side="left")
+
+        tk.Button(adv_filters_frame, text="Aplicar filtros", command=self.aplicar_filtros_menu_sushi, bg="#2196F3", fg="white").pack(side="left", padx=(10, 5))
+        tk.Button(adv_filters_frame, text="Limpiar filtros", command=lambda: (self.menu_search_var.set(''), self.menu_price_min.set(''), self.menu_price_max.set(''), self._menu_filters.pop('categoria', None), self.aplicar_filtros_menu_sushi()), bg="#9E9E9E", fg="white").pack(side="left")
+
+        # Mostrar productos desde la base de datos
+        try:
+            productos = db.load_products()
+            # Si la BD está vacía, crear productos de muestra
+            if not productos:
+                productos_muestra = [
+                    {'id': 'SUS01', 'nombre': 'California Roll', 'descripcion': 'Kanikama, palta, pepino', 'precio': 120.0, 'stock': 50, 'categoria': 'Rolls'},
+                    {'id': 'SUS02', 'nombre': 'Philadelphia Roll', 'descripcion': 'Salmón, queso Philadelphia, palta', 'precio': 150.0, 'stock': 45, 'categoria': 'Rolls'},
+                    {'id': 'SUS03', 'nombre': 'Salmon Roll', 'descripcion': 'Salmón fresco, pepino, wasabi', 'precio': 180.0, 'stock': 30, 'categoria': 'Especiales'},
+                    {'id': 'SUS04', 'nombre': 'Tuna Roll', 'descripcion': 'Atún rojo, palta, sésamo', 'precio': 200.0, 'stock': 25, 'categoria': 'Especiales'},
+                    {'id': 'SUS05', 'nombre': 'Veggie Roll', 'descripcion': 'Palta, pepino, zanahoria, lechuga', 'precio': 100.0, 'stock': 60, 'categoria': 'Vegetarianos'}
+                ]
+                
+                # Guardar productos de muestra en BD
+                for prod in productos_muestra:
+                    try:
+                        db.save_product(prod)
+                    except Exception:
+                        pass
+                
+                productos = productos_muestra
+        except Exception:
+            productos = []
+
+        # Cache de productos para aplicar filtros dinámicos
+        self._menu_productos_cache = productos
+        # Inicializar filtros activos
+        self._menu_filters = {}
+
+        # Crear tabla de productos mejorada
+        tabla_frame = tk.Frame(menu_container, bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill="both")
+        
+        # Scrollbars
+        scrollbar_v = ttk.Scrollbar(tabla_frame)
+        scrollbar_h = ttk.Scrollbar(tabla_frame, orient="horizontal")
+        
+        # Tabla con más información
+        cols = ("ID", "Nombre", "Descripción", "Precio", "Stock", "Categoría")
+        self.menu_tree = ttk.Treeview(tabla_frame, columns=cols, show="headings", 
+                                     yscrollcommand=scrollbar_v.set, 
+                                     xscrollcommand=scrollbar_h.set, height=12)
+        
+        # Configurar columnas
+        columnas_config = [
+            ("ID", 80, "center"),
+            ("Nombre", 180, "w"),
+            ("Descripción", 250, "w"),
+            ("Precio", 100, "center"),
+            ("Stock", 80, "center"),
+            ("Categoría", 120, "center")
         ]
         
-        self._crear_tabla(frame, ("Nombre", "Descripción", "Precio"), menu_items)
+        for col, ancho, anchor in columnas_config:
+            self.menu_tree.heading(col, text=col)
+            # Convertir string a constante tkinter
+            anchor_tk = "w" if anchor == "w" else "center" if anchor == "center" else "e"
+            self.menu_tree.column(col, width=ancho, anchor=anchor_tk)
+
+        # Llenado inicial de la tabla usando la cache y filtros
+        ofertas_activas = [o for o in self.ofertas if o.get('activa', False)]
+        # Poblamos la tabla aplicando filtros (vacío por defecto)
+        self.aplicar_filtros_menu_sushi()
+
+        # Configurar scrollbars
+        scrollbar_v.config(command=self.menu_tree.yview)
+        scrollbar_h.config(command=self.menu_tree.xview)
         
-        # Botones de acción
-        btn_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
-        btn_frame.pack(pady=20)
+        self.menu_tree.pack(side="left", fill="both", expand=True)
+        scrollbar_v.pack(side="right", fill="y")
+        scrollbar_h.pack(side="bottom", fill="x")
+
+        # Soporte para doble-clic: agregar producto seleccionado al carrito
+        try:
+            self.menu_tree.bind("<Double-1>", lambda e: self.agregar_seleccion_al_carrito_mejorado())
+        except Exception:
+            pass
+
+        # Menú contextual (clic derecho) para agregar al carrito o regresar
+        def _mostrar_menu_contextual(event):
+            try:
+                iid = self.menu_tree.identify_row(event.y)
+                # Si se hizo clic sobre una fila, seleccionarla
+                if iid:
+                    self.menu_tree.selection_set(iid)
+
+                menu = tk.Menu(self, tearoff=0)
+                menu.add_command(label="🛒 Agregar al Carrito", command=self.agregar_seleccion_al_carrito_mejorado)
+                menu.add_separator()
+                menu.add_command(label="⬅️ Regresar al Menú", command=self.mostrar_menu_principal)
+                menu.post(event.x_root, event.y_root)
+            except Exception:
+                pass
+
+        try:
+            # Button-3 es clic derecho en Windows
+            self.menu_tree.bind("<Button-3>", _mostrar_menu_contextual)
+        except Exception:
+            pass
+
+        # Botones de acción mejorados
+        btn_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        btn_frame.pack(fill="x", padx=20, pady=(15, 0))
+        
+        # Primera fila de botones
+        btn_row1 = tk.Frame(btn_frame, bg=self.color_fondo_ventana)
+        btn_row1.pack(pady=(10, 5))
         
         tamaños = self.calcular_tamaños_responsivos()
-        tk.Button(btn_frame, text="🛒 Agregar al Carrito", 
+
+        tk.Button(btn_row1, text="🛒 Agregar al Carrito", command=self.agregar_seleccion_al_carrito_mejorado,
                  bg="#4CAF50", fg="white", font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
-                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], pady=tamaños['boton_gestion_pady']).pack(side="left", padx=10)
-        tk.Button(btn_frame, text="🎁 Ver Ofertas", command=self.mostrar_ofertas_cliente,
-                 bg="#FF6F00", fg="white", font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
-                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], pady=tamaños['boton_gestion_pady']).pack(side="left", padx=10)
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], pady=tamaños['boton_gestion_pady'], width=20).pack(side="left", padx=5)
         
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=20)
+        tk.Button(btn_row1, text="🎁 Ver Todas las Ofertas", command=self.mostrar_ofertas_cliente,
+                 bg="#FF6F00", fg="white", font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], pady=tamaños['boton_gestion_pady'], width=20).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="🛒 Ver Carrito", command=self.mostrar_carrito,
+                 bg="#673AB7", fg="white", font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], pady=tamaños['boton_gestion_pady'], width=20).pack(side="left", padx=5)
+
+        # Segunda fila - información y navegación
+        btn_row2 = tk.Frame(btn_frame, bg=self.color_fondo_ventana)
+        btn_row2.pack(pady=(5, 10))
+        
+        # Mostrar información del carrito actual
+        try:
+            items_carrito = db.get_cart_item_count()
+            total_carrito = db.get_cart_total()
+            carrito_info = f"🛒 Carrito: {items_carrito} items - Total: ${total_carrito:.2f}"
+        except Exception:
+            carrito_info = "🛒 Carrito: 0 items"
+        
+        tk.Label(btn_row2, text=carrito_info, font=("Helvetica", 11, "bold"), 
+                bg=self.color_fondo_ventana, fg=self.color_titulo).pack(side="left")
+
+        tk.Button(btn_row2, text="⬅️ Regresar", command=self.mostrar_menu_principal,
+                 bg=self.color_boton_fondo, fg=self.color_boton_texto, font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], pady=tamaños['boton_gestion_pady']).pack(side="right")
+
+    def mostrar_ofertas_activas_en_menu(self, parent):
+        """Muestra un banner con las ofertas activas en el menú"""
+        try:
+            # Cargar ofertas desde BD
+            ofertas_bd = db.load_offers()
+            if ofertas_bd:
+                self.ofertas = ofertas_bd
+            
+            ofertas_activas = [o for o in self.ofertas if o.get('activa', False)]
+            
+            if ofertas_activas:
+                # Frame para ofertas con animación visual
+                ofertas_banner = tk.Frame(parent, bg="#FFE082", relief="raised", bd=3)
+                ofertas_banner.pack(fill="x", padx=20, pady=(0, 15))
+                
+                tk.Label(ofertas_banner, text="🎁 ¡OFERTAS ESPECIALES ACTIVAS! 🎁", 
+                        font=("Helvetica", 14, "bold"), bg="#FFE082", fg="#E65100").pack(pady=(8, 5))
+                
+                # Mostrar hasta 3 ofertas más relevantes
+                for i, oferta in enumerate(ofertas_activas[:3]):
+                    oferta_text = f"🔥 {oferta['nombre']}: {oferta['descripcion']}"
+                    tk.Label(ofertas_banner, text=oferta_text, 
+                            font=("Helvetica", 10), bg="#FFE082", fg="#BF360C",
+                            wraplength=700, justify="left").pack(anchor="w", padx=20, pady=1)
+                
+                if len(ofertas_activas) > 3:
+                    tk.Label(ofertas_banner, text=f"... y {len(ofertas_activas)-3} ofertas más", 
+                            font=("Helvetica", 9, "italic"), bg="#FFE082", fg="#8D6E63").pack(pady=(2, 8))
+                else:
+                    tk.Label(ofertas_banner, text=" ", bg="#FFE082").pack(pady=4)  # Espaciador
+        except Exception as e:
+            print(f"Error al cargar ofertas: {e}")
+
+    def filtrar_productos_por_categoria(self, categoria):
+        """Filtra los productos mostrados por categoría"""
+        # Implementación: establecer filtro de categoría y reaplicar filtros
+        if categoria == "Todos":
+            # Quitar el filtro de categoría
+            if hasattr(self, '_menu_filters'):
+                self._menu_filters.pop('categoria', None)
+        else:
+            if not hasattr(self, '_menu_filters'):
+                self._menu_filters = {}
+            self._menu_filters['categoria'] = categoria
+
+        # Aplicar filtros actuales
+        try:
+            self.aplicar_filtros_menu_sushi()
+        except Exception:
+            # Si algo falla, recargar la vista completa
+            self.mostrar_menu_sushi()
+
+    def aplicar_filtros_menu_sushi(self):
+        """Aplica filtros (búsqueda, categoría, rango de precio) sobre la cache de productos y actualiza self.menu_tree"""
+        # Limpiar tabla
+        try:
+            for iid in list(self.menu_tree.get_children()):
+                self.menu_tree.delete(iid)
+        except Exception:
+            pass
+
+        productos = getattr(self, '_menu_productos_cache', []) or []
+        filtros = getattr(self, '_menu_filters', {}) or {}
+
+        # Lectura de filtros de UI
+        texto_buscar = (getattr(self, 'menu_search_var', tk.StringVar()).get() or '').strip().lower()
+        precio_min = (getattr(self, 'menu_price_min', tk.StringVar()).get() or '').strip()
+        precio_max = (getattr(self, 'menu_price_max', tk.StringVar()).get() or '').strip()
+
+        try:
+            precio_min_val = float(precio_min) if precio_min else None
+        except Exception:
+            precio_min_val = None
+
+        try:
+            precio_max_val = float(precio_max) if precio_max else None
+        except Exception:
+            precio_max_val = None
+
+        ofertas_activas = [o for o in self.ofertas if o.get('activa', False)]
+
+        for prod in productos:
+            try:
+                if not prod.get('activo', True):
+                    continue
+
+                # Filtrar por categoría si aplica
+                categoria_filtro = filtros.get('categoria')
+                if categoria_filtro and categoria_filtro != 'Todos':
+                    if str(prod.get('categoria', '')).lower() != categoria_filtro.lower():
+                        continue
+
+                nombre = str(prod.get('nombre', ''))
+                descripcion = str(prod.get('descripcion', '') or '')
+
+                # Filtrar por búsqueda
+                if texto_buscar:
+                    if (texto_buscar not in nombre.lower()) and (texto_buscar not in descripcion.lower()):
+                        continue
+
+                precio_original = float(prod.get('precio', 0) or 0)
+                precio_mostrar = precio_original
+
+                # Aplicar ofertas (si aplica) para mostrar precio
+                for oferta in ofertas_activas:
+                    if self._producto_aplica_oferta(prod, oferta):
+                        if oferta.get('tipo') == 'descuento':
+                            descuento = oferta.get('descuento', 0)
+                            precio_mostrar = precio_original * (1 - descuento/100)
+                        break
+
+                # Filtrar por rango de precio
+                if precio_min_val is not None and precio_mostrar < precio_min_val:
+                    continue
+                if precio_max_val is not None and precio_mostrar > precio_max_val:
+                    continue
+
+                # Estado de stock
+                stock = prod.get('stock', 0)
+                nombre_con_oferta = nombre
+                if stock <= 0:
+                    nombre_con_oferta = f"{nombre_con_oferta} (AGOTADO)"
+                elif stock <= 10:
+                    nombre_con_oferta = f"{nombre_con_oferta} (POCO STOCK)"
+
+                iid = str(prod.get('id') or prod.get('nombre'))
+                self.menu_tree.insert("", "end", iid=iid, values=(
+                    prod.get('id'),
+                    nombre_con_oferta,
+                    descripcion,
+                    f"${precio_mostrar:.2f}" + (f" (era ${precio_original:.2f})" if precio_mostrar != precio_original else ""),
+                    stock,
+                    prod.get('categoria', 'General')
+                ))
+            except Exception:
+                # Omitir producto si alguno falla para mantener la UI responsiva
+                continue
+
+    def agregar_seleccion_al_carrito_mejorado(self):
+        """Versión mejorada para agregar productos al carrito con validaciones"""
+        sel = self.menu_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar producto", "Selecciona un producto para agregar al carrito")
+            return
+        
+        try:
+            iid = sel[0]
+            valores = self.menu_tree.item(iid)['values']
+            producto_id = valores[0]
+            
+            # Buscar producto en BD para obtener datos actualizados
+            productos = db.load_products()
+            producto = next((p for p in productos if str(p.get('id')) == str(producto_id)), None)
+            
+            if not producto:
+                messagebox.showerror("Error", "No se encontró el producto en la base de datos")
+                return
+            
+            # Verificar stock
+            stock_actual = producto.get('stock', 0)
+            if stock_actual <= 0:
+                messagebox.showwarning("Sin stock", f"El producto '{producto['nombre']}' está agotado")
+                return
+            
+            # Verificar si ya está en el carrito para calcular stock disponible
+            items_carrito = db.get_cart_items()
+            cantidad_en_carrito = sum(item['quantity'] for item in items_carrito if item['product_id'] == str(producto_id))
+            stock_disponible = stock_actual - cantidad_en_carrito
+            
+            if stock_disponible <= 0:
+                messagebox.showwarning("Sin stock", f"Ya tienes todo el stock disponible de '{producto['nombre']}' en tu carrito")
+                return
+            
+            # Aplicar ofertas si las hay
+            precio_final = float(producto.get('precio', 0))
+            oferta_aplicada = None
+            
+            ofertas_activas = [o for o in self.ofertas if o.get('activa', False)]
+            for oferta in ofertas_activas:
+                if self._producto_aplica_oferta(producto, oferta):
+                    if oferta['tipo'] == 'descuento':
+                        descuento = oferta['descuento']
+                        precio_final = precio_final * (1 - descuento/100)
+                        oferta_aplicada = oferta['nombre']
+                    break
+            
+            # Agregar al carrito
+            nombre_producto = producto.get('nombre') or 'Producto sin nombre'
+            db.add_cart_item(str(producto_id), nombre_producto, 1, precio_final)
+            
+            # Mensaje de confirmación con información de oferta si aplica
+            mensaje = f"✅ {producto.get('nombre')} agregado al carrito"
+            if oferta_aplicada:
+                mensaje += f"\n🎁 Oferta aplicada: {oferta_aplicada}"
+            if precio_final != float(producto.get('precio', 0)):
+                mensaje += f"\n💰 Precio con descuento: ${precio_final:.2f}"
+            
+            messagebox.showinfo("Agregado al carrito", mensaje)
+            
+            # Actualizar vista del menú para reflejar cambios en stock/carrito
+            self.mostrar_menu_sushi()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo agregar al carrito: {str(e)}")
+
+    def _producto_aplica_oferta(self, producto, oferta):
+        """Verifica si un producto es elegible para una oferta"""
+        productos_aplicables = oferta.get('productos_aplicables', [])
+        
+        # Si la oferta aplica a "todos" los productos
+        if 'todos' in productos_aplicables or not productos_aplicables:
+            return True
+        
+        # Si el producto específico está en la lista
+        if producto.get('nombre') in productos_aplicables or producto.get('id') in productos_aplicables:
+            return True
+        
+        # Si la categoría del producto está en la lista
+        if producto.get('categoria') in productos_aplicables:
+            return True
+        
+        return False
 
     def mostrar_carrito(self):
         frame = self.limpiar_ventana()
-        ttk.Label(frame, text="Carrito de Compras 🛒", style="Titulo.TLabel").pack(pady=(0, 20))
-        self._crear_tabla(frame, ("Producto", "Cantidad", "Subtotal"), [("California Roll", "2", "$240")])
+        self.marcar_ventana_actual('carrito')
+        
+        # Título mejorado
+        titulo_frame = tk.Frame(frame, bg="#4CAF50", relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+        tk.Label(titulo_frame, text="🛒 Carrito de Compras 🛒", 
+                font=("Impact", 20, "bold"), bg="#4CAF50", fg="white", pady=12).pack()
+        
+        # Frame para información del carrito
+        info_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        info_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        # Controles superiores del carrito
+        control_frame = tk.Frame(info_frame, bg=self.color_fondo_ventana)
+        control_frame.pack(fill="x", padx=10, pady=10)
+        
+        tk.Button(control_frame, text="🔄 Actualizar Carrito", 
+                 command=self.actualizar_carrito,
+                 bg="#2196F3", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=5).pack(side="left")
+        
+        tk.Button(control_frame, text="🗑️ Vaciar Carrito", 
+                 command=self.vaciar_carrito,
+                 bg="#F44336", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=5).pack(side="left", padx=(10, 0))
+        
+        self.carrito_info_label = tk.Label(control_frame, text="Cargando...", 
+                                          font=("Helvetica", 11, "bold"), 
+                                          bg=self.color_fondo_ventana, fg=self.color_titulo)
+        self.carrito_info_label.pack(side="right")
+        
+        # Tabla del carrito con más funcionalidad
+        tabla_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill="both", padx=15, pady=(0, 15))
+        
+        columns = ("ID", "Producto", "Precio Unit.", "Cantidad", "Subtotal")
+        self.carrito_tree = ttk.Treeview(tabla_frame, columns=columns, show="headings", height=10)
+        
+        # Configurar columnas
+        columnas_config = [
+            ("ID", 60, "center"),
+            ("Producto", 250, "w"),
+            ("Precio Unit.", 100, "center"),
+            ("Cantidad", 80, "center"),
+            ("Subtotal", 100, "center")
+        ]
+        
+        for col, ancho, anchor in columnas_config:
+            self.carrito_tree.heading(col, text=col)
+            # Convertir string a constante tkinter
+            anchor_tk = "w" if anchor == "w" else "center" if anchor == "center" else "e"
+            self.carrito_tree.column(col, width=ancho, anchor=anchor_tk)
+        
+        # Scrollbars
+        scrollbar_v = ttk.Scrollbar(tabla_frame, orient="vertical", command=self.carrito_tree.yview)
+        scrollbar_h = ttk.Scrollbar(tabla_frame, orient="horizontal", command=self.carrito_tree.xview)
+        self.carrito_tree.configure(yscrollcommand=scrollbar_v.set, xscrollcommand=scrollbar_h.set)
+        
+        self.carrito_tree.pack(side="left", fill="both", expand=True)
+        scrollbar_v.pack(side="right", fill="y")
+        
+        # Cargar datos del carrito
+        self.cargar_datos_carrito()
+        
+        # Frame para acciones del carrito
+        acciones_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        acciones_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        # Primera fila de botones de acción
+        acciones_row1 = tk.Frame(acciones_frame, bg=self.color_fondo_ventana)
+        acciones_row1.pack(pady=(10, 5))
+        
+        tk.Button(acciones_row1, text="➕ Aumentar Cantidad", 
+                 command=self.aumentar_cantidad_item,
+                 bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=6, width=18).pack(side="left", padx=5)
+        
+        tk.Button(acciones_row1, text="➖ Disminuir Cantidad", 
+                 command=self.disminuir_cantidad_item,
+                 bg="#FF9800", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=6, width=18).pack(side="left", padx=5)
+        
+        tk.Button(acciones_row1, text="🗑️ Eliminar Item", 
+                 command=self.eliminar_item_carrito,
+                 bg="#F44336", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=6, width=18).pack(side="left", padx=5)
+        
+        # Segunda fila con total y navegación
+        acciones_row2 = tk.Frame(acciones_frame, bg=self.color_fondo_ventana)
+        acciones_row2.pack(pady=(5, 10))
+        
+        # Frame para total
+        total_frame = tk.Frame(acciones_row2, bg="#E8F5E8", relief="raised", bd=2)
+        total_frame.pack(side="left", padx=(0, 20), pady=5)
+        
+        self.total_label = tk.Label(total_frame, text="Total: $0.00", 
+                                   font=("Helvetica", 16, "bold"), 
+                                   bg="#E8F5E8", fg="#2E7D32", padx=20, pady=10)
+        self.total_label.pack()
+        
+        # Botones de navegación
+        nav_frame = tk.Frame(acciones_row2, bg=self.color_fondo_ventana)
+        nav_frame.pack(side="right")
+        
+        tk.Button(nav_frame, text="🍣 Seguir Comprando", 
+                 command=self.mostrar_menu_sushi,
+                 bg="#673AB7", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8, width=18).pack(side="left", padx=5)
+
+        # Permitir confirmar el pedido directamente desde la vista del carrito
+        def realizar_pedido_desde_carrito():
+            try:
+                items = db.get_cart_items()
+                if not items:
+                    messagebox.showwarning("Carrito vacío", "No hay productos en el carrito")
+                    return
+
+                orden_id = f"VTA{len(self.ventas)+1:03d}"
+                fecha = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                productos = []
+                total_sin = 0.0
+                for it in items:
+                    prod = {'nombre': it['product_name'], 'cantidad': it['quantity'], 'precio': float(it['price']), 'subtotal': it['quantity'] * float(it['price'])}
+                    productos.append(prod)
+                    total_sin += prod['subtotal']
+
+                # Placeholder para aplicación de ofertas/descuntos
+                oferta_aplicada = None
+                descuento_aplicado = 0.0
+                total_final = total_sin - descuento_aplicado
+
+                orden = {
+                    'id': orden_id,
+                    'fecha': fecha,
+                    'productos': productos,
+                    'oferta_aplicada': oferta_aplicada,
+                    'descuento_aplicado': descuento_aplicado,
+                    'total_sin_descuento': total_sin,
+                    'total_final': total_final,
+                    'metodo_pago': 'efectivo',
+                    'cajero': 'Sistema',
+                    'estado': 'En preparación'
+                }
+
+                # Guardar orden en memoria y en BD
+                self.ventas.append(orden)
+                try:
+                    db.save_order(orden)
+                except Exception:
+                    pass
+
+                # Limpiar carrito
+                try:
+                    db.clear_cart()
+                except Exception:
+                    pass
+
+                # Refrescar vista del carrito
+                try:
+                    self.cargar_datos_carrito()
+                except Exception:
+                    pass
+
+                messagebox.showinfo("Pedido Confirmado", f"Pedido {orden_id} confirmado. Total: ${total_final:.2f}")
+                self.mostrar_menu_principal()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo confirmar el pedido: {e}")
+
+        tk.Button(nav_frame, text="📦 Realizar Pedido", 
+                 command=realizar_pedido_desde_carrito,
+                 bg="#4CAF50", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8, width=18).pack(side="left", padx=5)
+        
+        # Botón regresar
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=20)
+        tk.Button(frame, text="⬅️ Regresar al Menú Principal", 
+                 command=self.mostrar_menu_principal,
+                 bg=self.color_boton_fondo, fg=self.color_boton_texto, 
+                 font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], 
+                 pady=tamaños['boton_gestion_pady']).pack(pady=15)
+    
+    def cargar_datos_carrito(self):
+        """Carga los datos del carrito desde la base de datos"""
+        # Hacer la carga más tolerante a datos incompletos/erróneos para evitar errores intermitentes
+        # Limpiar tabla actual
+        try:
+            for item_id in list(self.carrito_tree.get_children()):
+                self.carrito_tree.delete(item_id)
+        except Exception:
+            # Si la tabla aún no existe por alguna razón, ignorar
+            pass
+
+        # Intentar leer items del carrito con reintentos suaves en caso de fallos transitorios
+        try:
+            items = db.get_cart_items() or []
+            # Si llegamos aquí, resetear contador de intentos
+            if hasattr(self, '_cart_load_attempts'):
+                self._cart_load_attempts = 0
+        except Exception as e:
+            # Inicializar contador de reintentos si no existe
+            attempts = getattr(self, '_cart_load_attempts', 0) + 1
+            self._cart_load_attempts = attempts
+            if attempts <= 3:
+                # Mostrar estado de reintento y programar un nuevo intento breve
+                try:
+                    self.carrito_info_label.config(text=f"⏳ Reintentando carga del carrito ({attempts}/3)...")
+                except Exception:
+                    pass
+                try:
+                    # Reintentar después de 500ms
+                    self.after(500, self.cargar_datos_carrito)
+                except Exception:
+                    pass
+                return
+            else:
+                # Agotar reintentos y mostrar mensaje de error persistente
+                err_msg = f"Error leyendo carrito: {e}"
+                try:
+                    self.carrito_info_label.config(text=f"❌ {err_msg}")
+                except Exception:
+                    pass
+                # Resetear contador para futuros intentos manuales
+                self._cart_load_attempts = 0
+                return
+
+        total_items = 0
+        total_precio = 0.0
+        errores_items = []
+
+        for item in items:
+            try:
+                # Valores seguros
+                cantidad = int(item.get('quantity', 0))
+                precio = float(item.get('price', 0.0))
+                subtotal = cantidad * precio
+
+                total_items += cantidad
+                total_precio += subtotal
+
+                # Insertar en tabla (usar valores formateados)
+                try:
+                    iid = str(item.get('id') or item.get('product_id') or total_items)
+                    self.carrito_tree.insert("", "end", iid=iid, values=(
+                        item.get('product_id', ''),
+                        item.get('product_name', ''),
+                        f"${precio:.2f}",
+                        cantidad,
+                        f"${subtotal:.2f}"
+                    ))
+                except Exception:
+                    # Si falla la inserción visual, continuar con los demás
+                    pass
+            except Exception as e:
+                # Registrar el error del item y continuar
+                errores_items.append(str(e))
+                continue
+
+        # Actualizar labels informativos
+        try:
+            if total_items == 0:
+                self.carrito_info_label.config(text="🛒 Carrito vacío")
+                self.total_label.config(text="Total: $0.00")
+            else:
+                self.carrito_info_label.config(text=f"🛒 {total_items} productos en carrito")
+                self.total_label.config(text=f"Total: ${total_precio:.2f}")
+
+            # Si hubo errores con algunos items, mostrar un aviso no intrusivo en la etiqueta
+            if errores_items:
+                # Mostrar número de items omitidos
+                try:
+                    self.carrito_info_label.config(text=self.carrito_info_label.cget('text') + f"  ⚠️ {len(errores_items)} item(s) omitidos")
+                except Exception:
+                    pass
+        except Exception:
+            # No bloquear la UI por errores de actualización de labels
+            pass
+    
+    def actualizar_carrito(self):
+        """Actualiza los datos del carrito desde la BD"""
+        self.cargar_datos_carrito()
+        messagebox.showinfo("Actualización", "Carrito actualizado desde la base de datos")
+    
+    def vaciar_carrito(self):
+        """Vacía completamente el carrito"""
+        if messagebox.askyesno("Confirmar", "¿Estás seguro de vaciar todo el carrito?\n\nEsta acción no se puede deshacer."):
+            try:
+                db.clear_cart()
+                self.cargar_datos_carrito()
+                messagebox.showinfo("Éxito", "Carrito vaciado correctamente")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al vaciar carrito: {str(e)}")
+    
+    def aumentar_cantidad_item(self):
+        """Aumenta la cantidad del item seleccionado"""
+        sel = self.carrito_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un producto para aumentar su cantidad")
+            return
+        
+        try:
+            item_id = int(sel[0])
+            # Obtener datos actuales del item
+            items = db.get_cart_items()
+            item = next((i for i in items if i['id'] == item_id), None)
+            
+            if item:
+                # Aumentar cantidad
+                nueva_cantidad = item['quantity'] + 1
+                db.update_cart_item_quantity(item_id, nueva_cantidad)
+                self.cargar_datos_carrito()
+                messagebox.showinfo("Éxito", f"Cantidad aumentada a {nueva_cantidad}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al aumentar cantidad: {str(e)}")
+    
+    def disminuir_cantidad_item(self):
+        """Disminuye la cantidad del item seleccionado"""
+        sel = self.carrito_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un producto para disminuir su cantidad")
+            return
+        
+        try:
+            item_id = int(sel[0])
+            # Obtener datos actuales del item
+            items = db.get_cart_items()
+            item = next((i for i in items if i['id'] == item_id), None)
+            
+            if item:
+                if item['quantity'] <= 1:
+                    # Si la cantidad es 1, preguntar si eliminar
+                    if messagebox.askyesno("Confirmar", "La cantidad es 1. ¿Deseas eliminar este producto del carrito?"):
+                        db.remove_cart_item(item_id)
+                        self.cargar_datos_carrito()
+                        messagebox.showinfo("Éxito", "Producto eliminado del carrito")
+                else:
+                    # Disminuir cantidad
+                    nueva_cantidad = item['quantity'] - 1
+                    db.update_cart_item_quantity(item_id, nueva_cantidad)
+                    self.cargar_datos_carrito()
+                    messagebox.showinfo("Éxito", f"Cantidad reducida a {nueva_cantidad}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al disminuir cantidad: {str(e)}")
+    
+    def eliminar_item_carrito(self):
+        """Elimina completamente un item del carrito"""
+        sel = self.carrito_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un producto para eliminar")
+            return
+        
+        try:
+            item_id = int(sel[0])
+            valores = self.carrito_tree.item(sel[0])['values']
+            producto_nombre = valores[1]
+            
+            if messagebox.askyesno("Confirmar", f"¿Estás seguro de eliminar '{producto_nombre}' del carrito?"):
+                db.remove_cart_item(item_id)
+                self.cargar_datos_carrito()
+                messagebox.showinfo("Éxito", f"'{producto_nombre}' eliminado del carrito")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al eliminar producto: {str(e)}")
 
     def mostrar_realizar_pedido(self):
         frame = self.limpiar_ventana()
         ttk.Label(frame, text="Confirmar Pedido 📦", style="Titulo.TLabel").pack(pady=(0, 20))
         ttk.Label(frame, text="Revisa tu pedido antes de confirmar.").pack()
-        ttk.Label(frame, text="Total: $240.00", style="Subtitulo.TLabel").pack(pady=10)
+        # Calcular total desde carrito
+        try:
+            items = db.get_cart_items()
+            total = sum(it['quantity'] * float(it['price']) for it in items)
+        except Exception:
+            items = []
+            total = 240.0
+
+        ttk.Label(frame, text=f"Total: ${total:.2f}", style="Subtitulo.TLabel").pack(pady=10)
         btn_frame = ttk.Frame(frame);
         btn_frame.pack(pady=10)
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(btn_frame, text="✅ Confirmar", width=tamaños['boton_width']//2).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="❌ Cancelar", width=tamaños['boton_width']//2).pack(side="left", padx=5)
+
+        def confirmar_pedido():
+            try:
+                if not items:
+                    messagebox.showwarning("Carrito vacío", "No hay productos en el carrito")
+                    return
+
+                orden_id = f"VTA{len(self.ventas)+1:03d}"
+                fecha = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                productos = []
+                total_sin = 0.0
+                for it in items:
+                    prod = {'nombre': it['product_name'], 'cantidad': it['quantity'], 'precio': float(it['price']), 'subtotal': it['quantity'] * float(it['price'])}
+                    productos.append(prod)
+                    total_sin += prod['subtotal']
+
+                # Aplicación simple de ofertas: (placeholder)
+                oferta_aplicada = None
+                descuento_aplicado = 0.0
+                total_final = total_sin - descuento_aplicado
+
+                orden = {
+                    'id': orden_id,
+                    'fecha': fecha,
+                    'productos': productos,
+                    'oferta_aplicada': oferta_aplicada,
+                    'descuento_aplicado': descuento_aplicado,
+                    'total_sin_descuento': total_sin,
+                    'total_final': total_final,
+                    'metodo_pago': 'efectivo',
+                    'cajero': 'Sistema',
+                    'estado': 'En preparación'
+                }
+
+                # Guardar orden en memoria y en BD
+                self.ventas.append(orden)
+                try:
+                    db.save_order(orden)
+                except Exception:
+                    pass
+
+                # Limpiar carrito
+                try:
+                    db.clear_cart()
+                except Exception:
+                    pass
+
+                messagebox.showinfo("Pedido Confirmado", f"Pedido {orden_id} confirmado. Total: ${total_final:.2f}")
+                self.mostrar_menu_principal()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo confirmar el pedido: {e}")
+
+        ttk.Button(btn_frame, text="✅ Confirmar", width=tamaños['boton_width']//2, command=confirmar_pedido).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="❌ Cancelar", width=tamaños['boton_width']//2, command=self.mostrar_menu_principal).pack(side="left", padx=5)
         ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=20)
 
     def mostrar_ofertas_cliente(self):
@@ -1095,34 +1838,411 @@ Ctrl+R: Selector de Roles"""
 
     def mostrar_historial(self):
         frame = self.limpiar_ventana()
-        ttk.Label(frame, text="Historial de Pedidos 📜", style="Titulo.TLabel").pack(pady=(0, 20))
-        self._crear_tabla(frame, ("ID Pedido", "Fecha", "Total", "Estado"),
-                          [("#1024", "2025-09-08", "$480", "Entregado")])
+        ttk.Label(frame, text="Historial de Pedidos 📜", style="Titulo.TLabel").pack(pady=(0, 12))
+
+        # Contenedor para la tabla
+        tabla_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill='both', padx=20, pady=(5, 10))
+
+        cols = ("ID Pedido", "Fecha", "Productos", "Total", "Estado")
+        historial_tree = ttk.Treeview(tabla_frame, columns=cols, show='headings', height=12)
+        for c in cols:
+            historial_tree.heading(c, text=c)
+            historial_tree.column(c, anchor='center')
+
+        scrollbar = ttk.Scrollbar(tabla_frame, orient='vertical', command=historial_tree.yview)
+        historial_tree.configure(yscrollcommand=scrollbar.set)
+        historial_tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+
+        # Cargar pedidos desde la base de datos
+        try:
+            pedidos = db.load_orders()
+        except Exception:
+            pedidos = []
+
+        # Rellenar tabla
+        for venta in sorted(pedidos, key=lambda x: x.get('fecha', ''), reverse=True):
+            try:
+                fecha = venta.get('fecha', '')
+                productos = venta.get('productos', [])
+                productos_texto = ", ".join([f"{p.get('nombre', p.get('id',''))} x{p.get('cantidad',0)}" for p in productos])
+                if len(productos_texto) > 60:
+                    productos_texto = productos_texto[:57] + '...'
+                total = f"${float(venta.get('total_final', 0)):.2f}"
+                estado = venta.get('estado', 'En preparación')
+                historial_tree.insert('', 'end', iid=venta.get('id'), values=(venta.get('id'), fecha, productos_texto, total, estado))
+            except Exception:
+                continue
+
+        # Acciones
+        acciones_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        acciones_frame.pack(fill='x', padx=20, pady=8)
+
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=20)
+
+        def _refresh():
+            try:
+                for iid in historial_tree.get_children():
+                    historial_tree.delete(iid)
+                pedidos = db.load_orders()
+                for venta in sorted(pedidos, key=lambda x: x.get('fecha', ''), reverse=True):
+                    try:
+                        fecha = venta.get('fecha', '')
+                        productos = venta.get('productos', [])
+                        productos_texto = ", ".join([f"{p.get('nombre', p.get('id',''))} x{p.get('cantidad',0)}" for p in productos])
+                        if len(productos_texto) > 60:
+                            productos_texto = productos_texto[:57] + '...'
+                        total = f"${float(venta.get('total_final', 0)):.2f}"
+                        estado = venta.get('estado', 'En preparación')
+                        historial_tree.insert('', 'end', iid=venta.get('id'), values=(venta.get('id'), fecha, productos_texto, total, estado))
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        def _ver_detalle():
+            sel = historial_tree.selection()
+            if not sel:
+                messagebox.showwarning('Seleccionar', 'Selecciona una venta para ver detalles')
+                return
+            vid = sel[0]
+            try:
+                pedidos = db.load_orders()
+                venta = next((v for v in pedidos if v.get('id') == vid), None)
+                if not venta:
+                    messagebox.showerror('Error', 'Venta no encontrada en la base de datos')
+                    return
+
+                detalles = f"ID: {venta.get('id')}\nFecha: {venta.get('fecha')}\nEstado: {venta.get('estado', '')}\nTotal: ${float(venta.get('total_final',0)):.2f}\nDescuento: ${float(venta.get('descuento_aplicado',0)):.2f}\n\nProductos:\n"
+                for p in venta.get('productos', []):
+                    detalles += f" - {p.get('nombre', p.get('id',''))} x{p.get('cantidad',0)} -> ${float(p.get('precio',0))*int(p.get('cantidad',0)):.2f}\n"
+
+                messagebox.showinfo('Detalle de Venta', detalles)
+            except Exception as e:
+                messagebox.showerror('Error', f'No se pudo obtener el detalle: {e}')
+
+        tk.Button(acciones_frame, text='📄 Ver Detalle', command=_ver_detalle, bg='#2196F3', fg='white', width=18).pack(side='left', padx=5)
+        tk.Button(acciones_frame, text='🔄 Refrescar', command=_refresh, bg='#4CAF50', fg='white', width=12).pack(side='right', padx=5)
+        tk.Button(acciones_frame, text='⬅️ Regresar', command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(side='right', padx=5)
 
     # --- Vistas Cajero ---
     def mostrar_registrar_pedido(self):
         self.mostrar_menu_sushi()
-        for widget in self.winfo_children()[0].winfo_children():
-            if isinstance(widget, ttk.Button) and widget['text'] == '⬅️ Regresar':
-                widget.configure(command=self.mostrar_menu_principal)
+        # After showing the menu, add a quick button in the menu header to go directly to the carrito
+        try:
+            root_frame = self.winfo_children()[0]
+            parent_for_buttons = None
+            # Buscar el label del título del menú para obtener su contenedor (titulo_frame)
+            for widget in root_frame.winfo_children():
+                try:
+                    if isinstance(widget, tk.Label) and 'Nuestro Menú' in str(widget.cget('text')):
+                        parent_for_buttons = widget.master
+                        break
+                except Exception:
+                    continue
+
+            if parent_for_buttons is None:
+                # Fallback: use first child frame
+                for widget in root_frame.winfo_children():
+                    if isinstance(widget, tk.Frame):
+                        parent_for_buttons = widget
+                        break
+
+            if parent_for_buttons is not None:
+                # Crear botón al header que lleve al carrito
+                try:
+                    btn_carrito = tk.Button(parent_for_buttons, text="🛒 Ir al Carrito", command=self.mostrar_carrito,
+                                            bg="#673AB7", fg="white", font=("Helvetica", 10, "bold"), relief="raised", bd=1, padx=10, pady=6)
+                    btn_carrito.pack(side="right", padx=10, pady=8)
+                except Exception:
+                    pass
+
+            # También reaplicar el comportamiento del botón regresar si existe
+            for widget in root_frame.winfo_children():
+                try:
+                    if hasattr(widget, 'cget') and widget.cget('text') and 'Regresar' in str(widget.cget('text')):
+                        try:
+                            widget.configure(command=self.mostrar_menu_principal)
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+        except Exception:
+            # No bloquear si algo falla
+            pass
 
     def mostrar_pedidos_activos(self):
         frame = self.limpiar_ventana()
         ttk.Label(frame, text="Pedidos Activos 👀", style="Titulo.TLabel").pack(pady=(0, 20))
-        self._crear_tabla(frame, ("ID Pedido", "Mesa", "Total", "Estado"), [("#1025", "5", "$600", "En preparación")])
+
+        # Contenedor para la tabla y acciones
+        tabla_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill="both", padx=20)
+
+        cols = ("ID Pedido", "Mesa", "Total", "Estado")
+        pedidos_tree = ttk.Treeview(tabla_frame, columns=cols, show='headings', height=10)
+        for c in cols:
+            pedidos_tree.heading(c, text=c)
+            pedidos_tree.column(c, anchor='center')
+
+        # Cargar pedidos activos desde BD
+        try:
+            pedidos = db.load_orders()
+            activos = [p for p in pedidos if p.get('estado', 'En preparación') in ('En preparación', 'Pendiente')]
+        except Exception:
+            activos = []
+
+        for p in activos:
+            pedidos_tree.insert('', 'end', iid=p.get('id'), values=(p.get('id'), p.get('cajero', ''), f"${float(p.get('total_final', 0)):.2f}", p.get('estado', 'En preparación')))
+
+        pedidos_tree.pack(side='left', fill='both', expand=True)
+        scrollbar = ttk.Scrollbar(tabla_frame, orient='vertical', command=pedidos_tree.yview)
+        pedidos_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+
+        # Acciones sobre pedidos
+        acciones_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        acciones_frame.pack(fill='x', padx=20, pady=10)
+
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=20)
+
+        def _refresh_pedidos():
+            try:
+                for iid in pedidos_tree.get_children():
+                    pedidos_tree.delete(iid)
+                pedidos = db.load_orders()
+                activos = [p for p in pedidos if p.get('estado', 'En preparación') in ('En preparación', 'Pendiente')]
+                for p in activos:
+                    pedidos_tree.insert('', 'end', iid=p.get('id'), values=(p.get('id'), p.get('cajero', ''), f"${float(p.get('total_final', 0)):.2f}", p.get('estado', 'En preparación')))
+            except Exception:
+                pass
+
+        def _cancelar_pedido():
+            sel = pedidos_tree.selection()
+            if not sel:
+                messagebox.showwarning('Seleccionar pedido', 'Selecciona un pedido para cancelar')
+                return
+            pid = sel[0]
+            if not messagebox.askyesno('Confirmar', f'¿Cancelar el pedido {pid}?'):
+                return
+            try:
+                # Actualizar estado en BD
+                pedidos = db.load_orders()
+                orden = next((o for o in pedidos if o.get('id') == pid), None)
+                if not orden:
+                    messagebox.showerror('Error', 'Pedido no encontrado')
+                    return
+                orden['estado'] = 'Cancelado'
+                db.save_order(orden)
+                messagebox.showinfo('Pedido cancelado', f'Pedido {pid} marcado como Cancelado')
+                _refresh_pedidos()
+            except Exception as e:
+                messagebox.showerror('Error', f'No se pudo cancelar el pedido: {e}')
+
+        def _completar_pedido():
+            sel = pedidos_tree.selection()
+            if not sel:
+                messagebox.showwarning('Seleccionar pedido', 'Selecciona un pedido para completar')
+                return
+            pid = sel[0]
+            if not messagebox.askyesno('Confirmar', f'¿Marcar el pedido {pid} como Completado? Esto restará el stock de los productos.'):
+                return
+            try:
+                pedidos = db.load_orders()
+                orden = next((o for o in pedidos if o.get('id') == pid), None)
+                if not orden:
+                    messagebox.showerror('Error', 'Pedido no encontrado')
+                    return
+
+                # Restar stock por cada producto en la orden
+                for item in orden.get('productos', []):
+                    # Intentar mapear por nombre o id
+                    prod_name = item.get('nombre')
+                    cantidad = int(item.get('cantidad', 0) or 0)
+                    try:
+                        prod = db.get_product_by_name(prod_name)
+                        if not prod:
+                            # No encontrado por nombre, intentar por id si está presente
+                            prod = db.get_product_by_id(item.get('id')) if item.get('id') else None
+                        if prod:
+                            db.update_product_stock(prod.get('id'), -cantidad)
+                    except Exception:
+                        # Si falla actualizar un producto, continuar con los demás
+                        continue
+
+                orden['estado'] = 'Completado'
+                db.save_order(orden)
+                messagebox.showinfo('Pedido completado', f'Pedido {pid} marcado como Completado y stock actualizado')
+                _refresh_pedidos()
+            except Exception as e:
+                messagebox.showerror('Error', f'No se pudo completar el pedido: {e}')
+
+        tk.Button(acciones_frame, text='✅ Completar Pedido', command=_completar_pedido, bg='#4CAF50', fg='white', width=20).pack(side='left', padx=5)
+        tk.Button(acciones_frame, text='❌ Cancelar Pedido', command=_cancelar_pedido, bg='#F44336', fg='white', width=20).pack(side='left', padx=5)
+        tk.Button(acciones_frame, text='🔄 Refrescar', command=_refresh_pedidos, bg='#2196F3', fg='white', width=12).pack(side='right', padx=5)
+
+        # Navegación
+        ttk.Button(frame, text='⬅️ Regresar', command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=10)
 
     def mostrar_cobrar(self):
         frame = self.limpiar_ventana()
         ttk.Label(frame, text="Cobrar / Facturar 💳", style="Titulo.TLabel").pack(pady=(0, 20))
-        ttk.Label(frame, text="ID del Pedido:", style="Subtitulo.TLabel").pack(pady=(10, 2))
-        ttk.Entry(frame, width=30).pack()
+
+        # Contenedor principal
+        main = tk.Frame(frame, bg=self.color_fondo_ventana)
+        main.pack(expand=True, fill='both', padx=20, pady=10)
+
+        # Selección de pedido reciente
+        tk.Label(main, text="Seleccionar pedido reciente:", bg=self.color_fondo_ventana, font=("Helvetica", 11, "bold")).pack(anchor='w')
+        try:
+            pedidos = db.load_orders()
+            # Ordenar por fecha descendente si la fecha está presente
+            try:
+                pedidos_sorted = sorted(pedidos, key=lambda x: x.get('fecha') or '', reverse=True)
+            except Exception:
+                pedidos_sorted = pedidos
+        except Exception:
+            pedidos_sorted = []
+
+        pedido_ids = [p.get('id') for p in pedidos_sorted]
+        self._cobrar_selected_order_var = tk.StringVar()
+        pedido_combo = ttk.Combobox(main, textvariable=self._cobrar_selected_order_var, values=pedido_ids, width=40)
+        pedido_combo.pack(anchor='w', pady=(6, 12))
+
+        # Área de detalles del pedido seleccionado
+        detalles_label = tk.Label(main, text="Detalles del pedido:", bg=self.color_fondo_ventana, font=("Helvetica", 11, "bold"))
+        detalles_label.pack(anchor='w')
+
+        detalles_text = tk.Text(main, height=12, wrap='word')
+        detalles_text.pack(fill='both', expand=False, pady=(6, 10))
+        detalles_text.configure(state='disabled')
+
+        def mostrar_detalles_seleccion(event=None):
+            sel = self._cobrar_selected_order_var.get()
+            detalles_text.configure(state='normal')
+            detalles_text.delete('1.0', 'end')
+            if not sel:
+                detalles_text.insert('1.0', 'Seleccione un pedido para ver su desglose')
+                detalles_text.configure(state='disabled')
+                return
+            orden = next((o for o in pedidos_sorted if o.get('id') == sel), None)
+            if not orden:
+                detalles_text.insert('1.0', 'Pedido no encontrado')
+                detalles_text.configure(state='disabled')
+                return
+
+            # Formatear texto del pedido
+            s = []
+            s.append(f"ID Pedido: {orden.get('id')}")
+            s.append(f"Fecha: {orden.get('fecha')}")
+            s.append(f"Cajero: {orden.get('cajero', '')}")
+            s.append(f"Estado: {orden.get('estado', '')}")
+            s.append('\nProductos:')
+            productos = orden.get('productos', []) or []
+            for it in productos:
+                nombre = it.get('nombre', '')
+                cantidad = int(it.get('cantidad', 0) or 0)
+                precio = float(it.get('precio', 0) or 0)
+                subtotal = float(it.get('subtotal', cantidad * precio) or (cantidad * precio))
+                s.append(f" - {nombre}: {cantidad} x ${precio:.2f} = ${subtotal:.2f}")
+
+            s.append('\nTotales:')
+            s.append(f"Total sin descuento: ${float(orden.get('total_sin_descuento', 0)):.2f}")
+            s.append(f"Descuento aplicado: ${float(orden.get('descuento_aplicado', 0)):.2f}")
+            s.append(f"Total final: ${float(orden.get('total_final', 0)):.2f}")
+            s.append(f"Método de pago: {orden.get('metodo_pago', '')}")
+
+            detalles_text.insert('1.0', '\n'.join(s))
+            detalles_text.configure(state='disabled')
+
+        pedido_combo.bind('<<ComboboxSelected>>', mostrar_detalles_seleccion)
+
+        # Acciones: exportar a TXT y confirmar pago
+        acciones = tk.Frame(main, bg=self.color_fondo_ventana)
+        acciones.pack(fill='x', pady=(10, 0))
+
+        def exportar_txt():
+            sel = self._cobrar_selected_order_var.get()
+            if not sel:
+                messagebox.showwarning('Seleccionar pedido', 'Selecciona un pedido para exportar')
+                return
+            orden = next((o for o in pedidos_sorted if o.get('id') == sel), None)
+            if not orden:
+                messagebox.showerror('Error', 'Pedido no encontrado')
+                return
+
+            # Guardar en folder 'tickets' dentro del proyecto con nombre <orderid>_ticket.txt
+            try:
+                proyecto_root = os.path.dirname(__file__)
+                tickets_dir = os.path.join(proyecto_root, 'tickets')
+                os.makedirs(tickets_dir, exist_ok=True)
+                filename = os.path.join(tickets_dir, f"{orden.get('id')}_ticket.txt")
+
+                # Formatear contenido
+                lines = []
+                lines.append('--- DESGLOSE DE PEDIDO ---')
+                lines.append(f"ID Pedido: {orden.get('id')}")
+                lines.append(f"Fecha: {orden.get('fecha')}")
+                lines.append(f"Cajero: {orden.get('cajero', '')}")
+                lines.append(f"Estado: {orden.get('estado', '')}")
+                lines.append('')
+                lines.append('Productos:')
+                for it in orden.get('productos', []) or []:
+                    nombre = it.get('nombre', '')
+                    cantidad = int(it.get('cantidad', 0) or 0)
+                    precio = float(it.get('precio', 0) or 0)
+                    subtotal = float(it.get('subtotal', cantidad * precio) or (cantidad * precio))
+                    lines.append(f" - {nombre}: {cantidad} x ${precio:.2f} = ${subtotal:.2f}")
+
+                lines.append('')
+                lines.append('Totales:')
+                lines.append(f"Total sin descuento: ${float(orden.get('total_sin_descuento', 0)):.2f}")
+                lines.append(f"Descuento aplicado: ${float(orden.get('descuento_aplicado', 0)):.2f}")
+                lines.append(f"Total final: ${float(orden.get('total_final', 0)):.2f}")
+                lines.append(f"Método de pago: {orden.get('metodo_pago', '')}")
+                lines.append('')
+                lines.append('Gracias por su compra.')
+
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(lines))
+
+                messagebox.showinfo('Exportado', f'Desglose guardado en:\n{filename}')
+            except Exception as e:
+                messagebox.showerror('Error', f'No se pudo exportar el pedido: {e}')
+
+        def confirmar_pago():
+            sel = self._cobrar_selected_order_var.get()
+            if not sel:
+                messagebox.showwarning('Seleccionar pedido', 'Selecciona un pedido para confirmar el pago')
+                return
+            if not messagebox.askyesno('Confirmar pago', f'¿Confirmar pago del pedido {sel}?'):
+                return
+            try:
+                pedidos_all = db.load_orders()
+                orden = next((o for o in pedidos_all if o.get('id') == sel), None)
+                if not orden:
+                    messagebox.showerror('Error', 'Pedido no encontrado')
+                    return
+                orden['estado'] = 'Pagado'
+                db.save_order(orden)
+                messagebox.showinfo('Pago confirmado', f'Pago del pedido {sel} confirmado')
+                # Refrescar combo y detalles
+                try:
+                    pedidos[:] = db.load_orders()
+                except Exception:
+                    pass
+                mostrar_detalles_seleccion()
+            except Exception as e:
+                messagebox.showerror('Error', f'No se pudo confirmar el pago: {e}')
+
+        btn_frame = tk.Frame(main, bg=self.color_fondo_ventana)
+        btn_frame.pack(fill='x', pady=(10, 0))
+
+        tk.Button(btn_frame, text='📄 Exportar a TXT', command=exportar_txt, bg='#607D8B', fg='white', width=18).pack(side='left', padx=5)
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(frame, text="✅ Confirmar Pago", width=tamaños['boton_width']).pack(pady=10)
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=20)
+        ttk.Button(btn_frame, text='✅ Confirmar Pago', command=confirmar_pago, width=tamaños['boton_width']//1).pack(side='left', padx=5)
+        ttk.Button(frame, text='⬅️ Regresar', command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=10)
 
     def mostrar_cancelar_pedido(self):
         frame = self.limpiar_ventana()
@@ -1136,19 +2256,269 @@ Ctrl+R: Selector de Roles"""
     # --- Vistas Admin ---
     def mostrar_gestion_productos(self):
         frame = self.limpiar_ventana()
-        ttk.Label(frame, text="Gestión de Productos 📦", style="Titulo.TLabel").pack(pady=(0, 20))
-        self._crear_tabla(frame, ("ID", "Nombre", "Precio"), [("SUS01", "California Roll", "$120")])
+        self.marcar_ventana_actual('productos')
+        
+        # Frame para título con información en tiempo real
+        titulo_frame = tk.Frame(frame, bg="#FF9800", relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+        
+        titulo_label = tk.Label(titulo_frame, text="📦 Gestión de Productos 📦", 
+                               font=("Impact", 20, "bold"), bg="#FF9800", fg="white", pady=10)
+        titulo_label.pack()
+        
+        # Frame para información y controles superiores
+        info_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        info_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        # Botón de actualizar y contador de productos
+        control_top_frame = tk.Frame(info_frame, bg=self.color_fondo_ventana)
+        control_top_frame.pack(fill="x", padx=10, pady=10)
+        
+        tk.Button(control_top_frame, text="🔄 Actualizar desde BD", 
+                 command=self.actualizar_productos_desde_bd,
+                 bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=5).pack(side="left")
+        
+        self.productos_count_label = tk.Label(control_top_frame, 
+                                             text="Cargando productos...", 
+                                             font=("Helvetica", 10), bg=self.color_fondo_ventana, fg=self.color_texto)
+        self.productos_count_label.pack(side="right")
 
-        btn_frame = ttk.Frame(frame);
-        btn_frame.pack(pady=20)
+        # Tabla de productos cargada desde DB
+        tabla_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill="both", padx=15, pady=(0, 10))
+
+        columns = ("ID", "Nombre", "Descripción", "Precio", "Stock")
+        self.product_tree = ttk.Treeview(tabla_frame, columns=columns, show="headings", height=10)
+        
+        # Configurar columnas con mejor ancho
+        columnas_config = [
+            ("ID", 80, "center"),
+            ("Nombre", 200, "w"),
+            ("Descripción", 280, "w"),
+            ("Precio", 100, "center"),
+            ("Stock", 80, "center")
+        ]
+        
+        for col, ancho, anchor in columnas_config:
+            self.product_tree.heading(col, text=col)
+            # Convertir string a constante tkinter
+            anchor_tk = "w" if anchor == "w" else "center" if anchor == "center" else "e"
+            self.product_tree.column(col, width=ancho, anchor=anchor_tk)
+
+        scrollbar = ttk.Scrollbar(tabla_frame, orient="vertical", command=self.product_tree.yview)
+        self.product_tree.configure(yscrollcommand=scrollbar.set)
+        self.product_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Cargar productos inicialmente
+        self.cargar_productos_en_tabla()
+
+        # Botones de gestión con mejor diseño
+        btn_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        btn_frame.pack(fill="x", padx=15, pady=(10, 0))
+        
+        # Primera fila de botones
+        btn_row1 = tk.Frame(btn_frame, bg=self.color_fondo_ventana)
+        btn_row1.pack(pady=(10, 5))
+        
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(btn_frame, text="➕ Agregar", width=tamaños['boton_width']//3,
-                   command=lambda: self.mostrar_formulario_producto("Agregar Producto")).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="✏️ Editar", width=tamaños['boton_width']//3,
-                   command=lambda: self.mostrar_formulario_producto("Editar Producto")).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="🗑️ Eliminar", width=tamaños['boton_width']//3).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="➕ Nuevo Producto", 
+                 command=lambda: self.mostrar_formulario_producto("nueva"),
+                 bg="#4CAF50", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="✏️ Editar Seleccionado", 
+                 command=self.editar_producto_seleccionado,
+                 bg="#FF9800", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="🗑️ Eliminar Seleccionado", 
+                 command=self.eliminar_producto_seleccionado,
+                 bg="#F44336", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        # Segunda fila de botones
+        btn_row2 = tk.Frame(btn_frame, bg=self.color_fondo_ventana)
+        btn_row2.pack(pady=(5, 10))
+        
+        tk.Button(btn_row2, text="📊 Ver Estadísticas", 
+                 command=self.mostrar_estadisticas_productos,
+                 bg="#673AB7", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        tk.Button(btn_row2, text="📤 Exportar Lista", 
+                 command=self.exportar_productos,
+                 bg="#607D8B", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
 
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=10)
+        # Botón regresar
+        tk.Button(frame, text="⬅️ Regresar al Menú Principal", 
+                 command=self.mostrar_menu_principal,
+                 bg=self.color_boton_fondo, fg=self.color_boton_texto, 
+                 font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], 
+                 pady=tamaños['boton_gestion_pady']).pack(pady=15)
+    
+    def cargar_productos_en_tabla(self):
+        """Carga productos desde la BD y actualiza la tabla"""
+        try:
+            # Limpiar tabla actual
+            for item in self.product_tree.get_children():
+                self.product_tree.delete(item)
+            
+            # Cargar productos desde BD
+            productos = db.load_products()
+            
+            # Si no hay productos en BD, crear algunos de muestra
+            if not productos:
+                productos_muestra = [
+                    {'id': 'SUS01', 'nombre': 'California Roll', 'descripcion': 'Kanikama, palta, pepino', 'precio': 120.0},
+                    {'id': 'SUS02', 'nombre': 'Philadelphia Roll', 'descripcion': 'Salmón, queso Philadelphia, palta', 'precio': 150.0},
+                    {'id': 'SUS03', 'nombre': 'Salmon Roll', 'descripcion': 'Salmón fresco, pepino, wasabi', 'precio': 180.0},
+                    {'id': 'SUS04', 'nombre': 'Tuna Roll', 'descripcion': 'Atún rojo, palta, sésamo', 'precio': 200.0},
+                    {'id': 'SUS05', 'nombre': 'Veggie Roll', 'descripcion': 'Palta, pepino, zanahoria, lechuga', 'precio': 100.0}
+                ]
+                
+                for prod in productos_muestra:
+                    try:
+                        db.save_product(prod)
+                    except Exception:
+                        pass
+                
+                productos = productos_muestra
+            
+            # Rellenar tabla
+            for p in productos:
+                precio = float(p.get('precio', 0))
+                # Agregar campo de stock (por defecto 50)
+                stock = p.get('stock', 50)
+                self.product_tree.insert("", "end", iid=str(p.get('id')), 
+                                       values=(p.get('id'), p.get('nombre'), 
+                                              p.get('descripcion', ''), f"${precio:.2f}", stock))
+            
+            # Actualizar contador
+            self.productos_count_label.config(text=f"📦 Total productos: {len(productos)}")
+            
+        except Exception as e:
+            self.productos_count_label.config(text=f"❌ Error: {str(e)}")
+            messagebox.showerror("Error", f"Error al cargar productos: {str(e)}")
+    
+    def actualizar_productos_desde_bd(self):
+        """Fuerza la actualización de productos desde la base de datos"""
+        self.cargar_productos_en_tabla()
+        messagebox.showinfo("Actualización", "Productos actualizados desde la base de datos")
+    
+    def mostrar_estadisticas_productos(self):
+        """Muestra estadísticas básicas de productos"""
+        try:
+            productos = db.load_products()
+            if not productos:
+                messagebox.showinfo("Sin datos", "No hay productos en la base de datos")
+                return
+            
+            total_productos = len(productos)
+            precio_promedio = sum(float(p.get('precio', 0)) for p in productos) / total_productos
+            precio_max = max(float(p.get('precio', 0)) for p in productos)
+            precio_min = min(float(p.get('precio', 0)) for p in productos)
+            
+            estadisticas = f"""📊 ESTADÍSTICAS DE PRODUCTOS
+            
+📈 Resumen General:
+• Total de productos: {total_productos}
+• Precio promedio: ${precio_promedio:.2f}
+• Precio más alto: ${precio_max:.2f}
+• Precio más bajo: ${precio_min:.2f}
+
+🎯 Análisis por Categoría:
+• Rolls especiales: {len([p for p in productos if 'Roll' in p.get('nombre', '')])}
+• Productos vegetarianos: {len([p for p in productos if 'Veggie' in p.get('nombre', '')])}
+"""
+            
+            messagebox.showinfo("Estadísticas de Productos", estadisticas)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al calcular estadísticas: {str(e)}")
+    
+    def exportar_productos(self):
+        """Exporta la lista de productos a un archivo"""
+        try:
+            productos = db.load_products()
+            if not productos:
+                messagebox.showinfo("Sin datos", "No hay productos para exportar")
+                return
+            
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Guardar lista de productos"
+            )
+            
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(productos, f, indent=2, ensure_ascii=False)
+                messagebox.showinfo("Éxito", f"Productos exportados a:\n{filename}")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar productos: {str(e)}")
+
+    def editar_producto_seleccionado(self):
+        sel = self.product_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un producto para editar")
+            return
+        
+        pid = sel[0]
+        # Obtener valores de la tabla
+        valores = self.product_tree.item(pid)['values']
+        if not valores:
+            messagebox.showerror("Error", "No se pudieron obtener los datos del producto")
+            return
+        
+        # Abrir formulario en modo editar con el ID del producto
+        self.mostrar_formulario_producto("editar", producto_id=valores[0])
+
+    def eliminar_producto_seleccionado(self):
+        sel = self.product_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un producto para eliminar")
+            return
+        
+        pid = sel[0]
+        valores = self.product_tree.item(pid)['values']
+        if not valores:
+            messagebox.showerror("Error", "No se pudieron obtener los datos del producto")
+            return
+            
+        nombre = valores[1]
+        
+        # Confirmación con información detallada
+        respuesta = messagebox.askyesno("Confirmar Eliminación", 
+                                       f"¿Estás seguro de eliminar el producto?\n\n"
+                                       f"ID: {valores[0]}\n"
+                                       f"Nombre: {nombre}\n"
+                                       f"Precio: {valores[3]}\n\n"
+                                       f"Esta acción no se puede deshacer.")
+        
+        if respuesta:
+            try:
+                # Eliminar de la base de datos
+                db.delete_product(pid)
+                
+                # Eliminar de la tabla visual
+                self.product_tree.delete(pid)
+                
+                # Actualizar contador
+                productos_restantes = len(self.product_tree.get_children())
+                self.productos_count_label.config(text=f"📦 Total productos: {productos_restantes}")
+                
+                messagebox.showinfo("Éxito", f"Producto '{nombre}' eliminado correctamente")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo eliminar el producto: {str(e)}")
+                # Recargar la tabla en caso de error
+                self.cargar_productos_en_tabla()
 
     def mostrar_gestion_ofertas(self):
         """Vista de gestión de ofertas para administradores"""
@@ -1333,6 +2703,11 @@ Ctrl+R: Selector de Roles"""
                 
                 if modo == "nueva":
                     self.ofertas.append(nueva_oferta)
+                    # persistir en BD
+                    try:
+                        db.save_offer(nueva_oferta)
+                    except Exception:
+                        pass
                     messagebox.showinfo("Éxito", "Oferta creada exitosamente")
                 else:
                     # Actualizar oferta existente
@@ -1340,6 +2715,11 @@ Ctrl+R: Selector de Roles"""
                         if oferta['id'] == oferta_id:
                             self.ofertas[i] = nueva_oferta
                             break
+                    # persistir en BD
+                    try:
+                        db.save_offer(nueva_oferta)
+                    except Exception:
+                        pass
                     messagebox.showinfo("Éxito", "Oferta actualizada exitosamente")
                 
                 self.mostrar_gestion_ofertas()
@@ -1379,6 +2759,10 @@ Ctrl+R: Selector de Roles"""
         
         if messagebox.askyesno("Confirmar", f"¿Estás seguro de eliminar la oferta '{oferta_nombre}'?"):
             self.ofertas = [o for o in self.ofertas if o['id'] != oferta_id]
+            try:
+                db.delete_offer(oferta_id)
+            except Exception:
+                pass
             messagebox.showinfo("Éxito", "Oferta eliminada exitosamente")
             self.mostrar_gestion_ofertas()
     
@@ -1396,6 +2780,10 @@ Ctrl+R: Selector de Roles"""
         for oferta in self.ofertas:
             if oferta['id'] == oferta_id:
                 oferta['activa'] = nuevo_estado
+                try:
+                    db.toggle_offer(oferta_id, nuevo_estado)
+                except Exception:
+                    pass
                 estado_texto = "activada" if nuevo_estado else "desactivada"
                 messagebox.showinfo("Éxito", f"Oferta {estado_texto} exitosamente")
                 self.mostrar_gestion_ofertas()
@@ -1429,39 +2817,898 @@ Ctrl+R: Selector de Roles"""
 
     def mostrar_gestion_usuarios(self):
         frame = self.limpiar_ventana()
-        ttk.Label(frame, text="Gestión de Usuarios 👤", style="Titulo.TLabel").pack(pady=(0, 20))
-        self._crear_tabla(frame, ("ID", "Nombre", "Rol"), [("USR01", "Ana Gomez", "cajero")])
+        self.marcar_ventana_actual('usuarios')
+        
+        # Título mejorado
+        titulo_frame = tk.Frame(frame, bg="#FF9800", relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+        tk.Label(titulo_frame, text="👤 Gestión de Usuarios 👤", 
+                font=("Impact", 20, "bold"), bg="#FF9800", fg="white", pady=12).pack()
+        
+        # Inicializar usuarios por defecto si es necesario
+        try:
+            db.init_default_users()
+        except Exception:
+            pass
+        
+        # Frame para información y controles superiores
+        info_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        info_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        # Botón de actualizar y contador
+        control_top_frame = tk.Frame(info_frame, bg=self.color_fondo_ventana)
+        control_top_frame.pack(fill="x", padx=10, pady=10)
+        
+        tk.Button(control_top_frame, text="🔄 Actualizar desde BD", 
+                 command=self.actualizar_usuarios_desde_bd,
+                 bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"),
+                 relief="raised", bd=2, padx=15, pady=5).pack(side="left")
+        
+        self.usuarios_count_label = tk.Label(control_top_frame, 
+                                            text="Cargando usuarios...", 
+                                            font=("Helvetica", 10), bg=self.color_fondo_ventana, fg=self.color_texto)
+        self.usuarios_count_label.pack(side="right")
 
-        btn_frame = ttk.Frame(frame);
-        btn_frame.pack(pady=20)
+        # Tabla de usuarios
+        tabla_frame = tk.Frame(frame, bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill="both", padx=15, pady=(0, 10))
+
+        columns = ("ID", "Usuario", "Nombre Completo", "Rol", "Email", "Último Login", "Estado")
+        self.users_tree = ttk.Treeview(tabla_frame, columns=columns, show="headings", height=10)
+        
+        # Configurar columnas
+        columnas_config = [
+            ("ID", 50, "center"),
+            ("Usuario", 120, "w"),
+            ("Nombre Completo", 180, "w"),
+            ("Rol", 100, "center"),
+            ("Email", 200, "w"),
+            ("Último Login", 130, "center"),
+            ("Estado", 80, "center")
+        ]
+        
+        for col, ancho, anchor in columnas_config:
+            self.users_tree.heading(col, text=col)
+            # Convertir string a constante tkinter
+            anchor_tk = "w" if anchor == "w" else "center" if anchor == "center" else "e"
+            self.users_tree.column(col, width=ancho, anchor=anchor_tk)
+
+        scrollbar = ttk.Scrollbar(tabla_frame, orient="vertical", command=self.users_tree.yview)
+        self.users_tree.configure(yscrollcommand=scrollbar.set)
+        self.users_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Cargar usuarios inicialmente
+        self.cargar_usuarios_en_tabla()
+
+        # Botones de gestión
+        btn_frame = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        btn_frame.pack(fill="x", padx=15, pady=(10, 0))
+        
+        # Primera fila de botones
+        btn_row1 = tk.Frame(btn_frame, bg=self.color_fondo_ventana)
+        btn_row1.pack(pady=(10, 5))
+        
+        tk.Button(btn_row1, text="➕ Nuevo Usuario", 
+                 command=lambda: self.mostrar_formulario_usuario("nuevo"),
+                 bg="#4CAF50", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="✏️ Editar Seleccionado", 
+                 command=self.editar_usuario_seleccionado,
+                 bg="#FF9800", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="🔑 Cambiar Contraseña", 
+                 command=self.mostrar_dialogo_cambiar_password,
+                 bg="#673AB7", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        # Segunda fila de botones
+        btn_row2 = tk.Frame(btn_frame, bg=self.color_fondo_ventana)
+        btn_row2.pack(pady=(5, 10))
+        
+        tk.Button(btn_row2, text="❌ Desactivar Usuario", 
+                 command=self.toggle_usuario_estado,
+                 bg="#F44336", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+        
+        tk.Button(btn_row2, text="🗑️ Eliminar Permanente", 
+                 command=self.eliminar_usuario_seleccionado,
+                 bg="#D32F2F", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=15, pady=8, width=18).pack(side="left", padx=5)
+
+        # Botón regresar
         tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(btn_frame, text="➕ Agregar", width=tamaños['boton_width']//3).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="✏️ Editar", width=tamaños['boton_width']//3).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="🗑️ Eliminar", width=tamaños['boton_width']//3).pack(side="left", padx=5)
+        tk.Button(frame, text="⬅️ Regresar al Menú Principal", 
+                 command=self.mostrar_menu_principal,
+                 bg=self.color_boton_fondo, fg=self.color_boton_texto, 
+                 font=("Helvetica", tamaños['boton_gestion_font'], "bold"),
+                 relief="raised", bd=2, padx=tamaños['boton_gestion_padx'], 
+                 pady=tamaños['boton_gestion_pady']).pack(pady=15)
+    
+    def cargar_usuarios_en_tabla(self):
+        """Carga usuarios desde la BD y actualiza la tabla"""
+        try:
+            # Limpiar tabla actual
+            for item in self.users_tree.get_children():
+                self.users_tree.delete(item)
+            
+            # Cargar usuarios desde BD
+            usuarios = db.load_users()
+            
+            # Rellenar tabla
+            for usuario in usuarios:
+                ultimo_login = usuario.get('last_login', 'Nunca')
+                if ultimo_login and ultimo_login != 'Nunca':
+                    try:
+                        ultimo_login = datetime.datetime.fromisoformat(ultimo_login).strftime('%d/%m/%Y %H:%M')
+                    except:
+                        ultimo_login = 'Nunca'
+                
+                estado = "✅ Activo" if usuario.get('active', True) else "❌ Inactivo"
+                
+                self.users_tree.insert("", "end", iid=str(usuario.get('id')), 
+                                      values=(
+                                          usuario.get('id'),
+                                          usuario.get('username'),
+                                          usuario.get('full_name', ''),
+                                          usuario.get('role', 'cliente').capitalize(),
+                                          usuario.get('email', ''),
+                                          ultimo_login,
+                                          estado
+                                      ))
+            
+            # Actualizar contador
+            self.usuarios_count_label.config(text=f"👤 Total usuarios: {len(usuarios)}")
+            
+        except Exception as e:
+            self.usuarios_count_label.config(text=f"❌ Error: {str(e)}")
+            messagebox.showerror("Error", f"Error al cargar usuarios: {str(e)}")
+    
+    def actualizar_usuarios_desde_bd(self):
+        """Fuerza la actualización de usuarios desde la base de datos"""
+        self.cargar_usuarios_en_tabla()
+        messagebox.showinfo("Actualización", "Usuarios actualizados desde la base de datos")
+    
+    def editar_usuario_seleccionado(self):
+        """Edita el usuario seleccionado"""
+        sel = self.users_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un usuario para editar")
+            return
+        
+        user_id = int(sel[0])
+        self.mostrar_formulario_usuario("editar", user_id)
+    
+    def mostrar_dialogo_cambiar_password(self):
+        """Muestra diálogo para cambiar contraseña del usuario seleccionado"""
+        sel = self.users_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un usuario para cambiar su contraseña")
+            return
+        
+        user_id = int(sel[0])
+        self.cambiar_password_usuario(user_id)
+    
+    def cambiar_password_usuario_old(self):
+        """Cambia la contraseña del usuario seleccionado"""
+        sel = self.users_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un usuario para cambiar su contraseña")
+            return
+        
+        user_id = int(sel[0])
+        valores = self.users_tree.item(sel[0])['values']
+        username = valores[1]
+        
+        # Ventana para cambiar contraseña
+        password_window = tk.Toplevel(self)
+        password_window.title(f"Cambiar Contraseña - {username}")
+        password_window.geometry("400x250")
+        password_window.configure(bg=self.color_fondo_ventana)
+        password_window.resizable(False, False)
+        
+        tk.Label(password_window, text=f"🔑 Cambiar Contraseña para: {username}", 
+                font=("Helvetica", 14, "bold"), bg=self.color_fondo_ventana, fg=self.color_titulo).pack(pady=20)
+        
+        tk.Label(password_window, text="Nueva contraseña:", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana, fg=self.color_texto).pack(anchor="w", padx=20, pady=(10, 2))
+        nueva_password = tk.Entry(password_window, show="*", width=30, font=("Helvetica", 11))
+        nueva_password.pack(padx=20, pady=(0, 10))
+        
+        tk.Label(password_window, text="Confirmar contraseña:", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana, fg=self.color_texto).pack(anchor="w", padx=20, pady=(10, 2))
+        confirmar_password = tk.Entry(password_window, show="*", width=30, font=("Helvetica", 11))
+        confirmar_password.pack(padx=20, pady=(0, 20))
+        
+        def guardar_nueva_password():
+            nueva = nueva_password.get()
+            confirmar = confirmar_password.get()
+            
+            if not nueva or not confirmar:
+                messagebox.showerror("Error", "Ambos campos son obligatorios")
+                return
+            
+            if nueva != confirmar:
+                messagebox.showerror("Error", "Las contraseñas no coinciden")
+                return
+            
+            if len(nueva) < 6:
+                messagebox.showerror("Error", "La contraseña debe tener al menos 6 caracteres")
+                return
+            
+            try:
+                if db.change_user_password(user_id, nueva):
+                    messagebox.showinfo("Éxito", f"Contraseña cambiada exitosamente para {username}")
+                    password_window.destroy()
+                else:
+                    messagebox.showerror("Error", "No se pudo cambiar la contraseña")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al cambiar contraseña: {str(e)}")
+        
+        btn_frame = tk.Frame(password_window, bg=self.color_fondo_ventana)
+        btn_frame.pack(pady=20)
+        
+        tk.Button(btn_frame, text="💾 Guardar", command=guardar_nueva_password,
+                 bg="#4CAF50", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8).pack(side="left", padx=10)
+        
+        tk.Button(btn_frame, text="❌ Cancelar", command=password_window.destroy,
+                 bg="#F44336", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8).pack(side="left", padx=10)
+        
+        nueva_password.focus()
+    
+    def toggle_usuario_estado(self):
+        """Activa/desactiva el usuario seleccionado"""
+        sel = self.users_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un usuario para cambiar su estado")
+            return
+        
+        user_id = int(sel[0])
+        valores = self.users_tree.item(sel[0])['values']
+        username = valores[1]
+        estado_actual = "✅ Activo" in valores[6]
+        
+        nuevo_estado = not estado_actual
+        accion = "activar" if nuevo_estado else "desactivar"
+        
+        if messagebox.askyesno("Confirmar", f"¿Estás seguro de {accion} al usuario '{username}'?"):
+            try:
+                db.update_user(user_id, active=nuevo_estado)
+                self.cargar_usuarios_en_tabla()
+                messagebox.showinfo("Éxito", f"Usuario {username} {'activado' if nuevo_estado else 'desactivado'} exitosamente")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al cambiar estado del usuario: {str(e)}")
+    
+    def eliminar_usuario_seleccionado(self):
+        """Elimina permanentemente el usuario seleccionado"""
+        sel = self.users_tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona un usuario para eliminar")
+            return
+        
+        user_id = int(sel[0])
+        valores = self.users_tree.item(sel[0])['values']
+        username = valores[1]
+        
+        respuesta = messagebox.askyesno("⚠️ Confirmar Eliminación Permanente", 
+                                       f"¿Estás seguro de eliminar PERMANENTEMENTE al usuario?\n\n"
+                                       f"Usuario: {username}\n"
+                                       f"Nombre: {valores[2]}\n"
+                                       f"Rol: {valores[3]}\n\n"
+                                       f"Esta acción NO se puede deshacer.")
+        
+        if respuesta:
+            try:
+                db.delete_user(user_id)
+                self.cargar_usuarios_en_tabla()
+                messagebox.showinfo("Éxito", f"Usuario '{username}' eliminado permanentemente")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al eliminar usuario: {str(e)}")
+    
+    def mostrar_formulario_usuario(self, modo, user_id=None):
+        """Formulario para crear/editar usuarios"""
+        frame = self.limpiar_ventana()
+        
+        # Título dinámico según el modo
+        titulo = "➕ Crear Nuevo Usuario" if modo == 'nuevo' else "✏️ Editar Usuario"
+        color_titulo = "#4CAF50" if modo == 'nuevo' else "#FF9800"
+        
+        # Frame de título
+        titulo_frame = tk.Frame(frame, bg=color_titulo, relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+        tk.Label(titulo_frame, text=titulo, font=("Impact", 18, "bold"), 
+                bg=color_titulo, fg="white", pady=12).pack()
 
-        ttk.Button(frame, text="⬅️ Regresar", command=self.mostrar_menu_principal, width=tamaños['boton_width']).pack(pady=10)
+        # Frame principal del formulario
+        form_container = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        form_container.pack(pady=20, padx=50)
+        
+        form_frame = tk.Frame(form_container, bg=self.color_fondo_ventana)
+        form_frame.pack(padx=30, pady=30)
+
+        # Variables del formulario
+        var_username = tk.StringVar()
+        var_password = tk.StringVar()
+        var_confirm_password = tk.StringVar()
+        var_full_name = tk.StringVar()
+        var_email = tk.StringVar()
+        var_role = tk.StringVar(value="cliente")
+
+        # Campo Username
+        tk.Label(form_frame, text="👤 Nombre de Usuario:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=0, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        entry_username = tk.Entry(form_frame, textvariable=var_username, width=40, font=("Helvetica", 11), 
+                                 relief="solid", bd=2, bg="#FFFFFF")
+        entry_username.grid(row=0, column=1, pady=(10, 2), sticky="ew")
+
+        # Campo Contraseña (solo para nuevo usuario)
+        if modo == 'nuevo':
+            tk.Label(form_frame, text="🔑 Contraseña:", 
+                    font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=1, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+            entry_password = tk.Entry(form_frame, textvariable=var_password, show="*", width=40, font=("Helvetica", 11), 
+                                     relief="solid", bd=2, bg="#FFFFFF")
+            entry_password.grid(row=1, column=1, pady=(10, 2), sticky="ew")
+
+            tk.Label(form_frame, text="🔑 Confirmar Contraseña:", 
+                    font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=2, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+            entry_confirm = tk.Entry(form_frame, textvariable=var_confirm_password, show="*", width=40, font=("Helvetica", 11), 
+                                   relief="solid", bd=2, bg="#FFFFFF")
+            entry_confirm.grid(row=2, column=1, pady=(10, 2), sticky="ew")
+            
+            row_offset = 3
+        else:
+            row_offset = 1
+
+        # Campo Nombre Completo
+        tk.Label(form_frame, text="👨‍💼 Nombre Completo:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=row_offset, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        entry_full_name = tk.Entry(form_frame, textvariable=var_full_name, width=40, font=("Helvetica", 11), 
+                                  relief="solid", bd=2, bg="#FFFFFF")
+        entry_full_name.grid(row=row_offset, column=1, pady=(10, 2), sticky="ew")
+
+        # Campo Email
+        tk.Label(form_frame, text="📧 Email:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=row_offset+1, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        entry_email = tk.Entry(form_frame, textvariable=var_email, width=40, font=("Helvetica", 11), 
+                              relief="solid", bd=2, bg="#FFFFFF")
+        entry_email.grid(row=row_offset+1, column=1, pady=(10, 2), sticky="ew")
+
+        # Campo Rol
+        tk.Label(form_frame, text="🎭 Rol del Usuario:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=row_offset+2, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        
+        roles_frame = tk.Frame(form_frame, bg=self.color_fondo_ventana)
+        roles_frame.grid(row=row_offset+2, column=1, pady=(10, 2), sticky="w")
+        
+        roles = [("👤 Cliente", "cliente"), ("💰 Cajero", "cajero"), ("⚙️ Administrador", "admin")]
+        for i, (texto, valor) in enumerate(roles):
+            tk.Radiobutton(roles_frame, text=texto, variable=var_role, value=valor,
+                          bg=self.color_fondo_ventana, fg=self.color_texto, font=("Helvetica", 10)).pack(side="left", padx=(0, 20))
+
+        # Configurar grid para que se expanda
+        form_frame.grid_columnconfigure(1, weight=1)
+
+        # Si es edición, cargar valores
+        if modo == 'editar' and user_id:
+            try:
+                usuarios = db.load_users()
+                usuario = next((u for u in usuarios if u['id'] == user_id), None)
+                if usuario:
+                    var_username.set(usuario.get('username', ''))
+                    entry_username.config(state='disabled')  # No permitir cambiar username en edición
+                    var_full_name.set(usuario.get('full_name', ''))
+                    var_email.set(usuario.get('email', ''))
+                    var_role.set(usuario.get('role', 'cliente'))
+                else:
+                    messagebox.showerror("Error", "No se encontró el usuario en la base de datos")
+                    self.mostrar_gestion_usuarios()
+                    return
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al cargar datos del usuario: {str(e)}")
+                self.mostrar_gestion_usuarios()
+                return
+
+        def guardar_usuario():
+            # Obtener valores
+            username = var_username.get().strip()
+            full_name = var_full_name.get().strip()
+            email = var_email.get().strip()
+            role = var_role.get()
+
+            # Validaciones
+            errores = []
+            
+            if not username:
+                errores.append("• Nombre de usuario es obligatorio")
+            elif len(username) < 3:
+                errores.append("• El nombre de usuario debe tener al menos 3 caracteres")
+            
+            if not full_name:
+                errores.append("• Nombre completo es obligatorio")
+            
+            if email and '@' not in email:
+                errores.append("• Email inválido")
+            
+            if modo == 'nuevo':
+                password = var_password.get()
+                confirm_password = var_confirm_password.get()
+                
+                if not password:
+                    errores.append("• Contraseña es obligatoria")
+                elif len(password) < 6:
+                    errores.append("• La contraseña debe tener al menos 6 caracteres")
+                
+                if password != confirm_password:
+                    errores.append("• Las contraseñas no coinciden")
+
+            if errores:
+                messagebox.showerror("Errores de Validación", "Por favor corrige los siguientes errores:\n\n" + "\n".join(errores))
+                return
+
+            try:
+                if modo == 'nuevo':
+                    # Crear nuevo usuario
+                    if db.create_user(username, var_password.get(), full_name, role, email):
+                        messagebox.showinfo("Éxito", "Usuario creado exitosamente")
+                        self.mostrar_gestion_usuarios()
+                    else:
+                        messagebox.showerror("Error", "El nombre de usuario ya existe")
+                else:
+                    # Editar usuario existente
+                    if user_id is not None:
+                        db.update_user(user_id, full_name=full_name, role=role, email=email)
+                        messagebox.showinfo("Éxito", "Usuario actualizado exitosamente")
+                        self.mostrar_gestion_usuarios()
+                    else:
+                        messagebox.showerror("Error", "ID de usuario inválido")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo guardar el usuario: {str(e)}")
+
+        # Frame para botones
+        btn_frame = tk.Frame(form_container, bg=self.color_fondo_ventana)
+        btn_frame.pack(pady=(20, 30))
+
+        # Botones con colores mejorados
+        tk.Button(btn_frame, text="💾 Guardar Usuario", command=guardar_usuario,
+                  bg="#4CAF50", fg="white", font=("Helvetica", 12, "bold"),
+                  relief="raised", bd=2, padx=25, pady=10, width=20).pack(side="left", padx=10)
+        
+        tk.Button(btn_frame, text="❌ Cancelar", command=self.mostrar_gestion_usuarios,
+                  bg="#F44336", fg="white", font=("Helvetica", 12, "bold"),
+                  relief="raised", bd=2, padx=25, pady=10, width=20).pack(side="left", padx=10)
+
+        # Focus en el primer campo editable
+        if modo == 'nuevo':
+            entry_username.focus()
+        else:
+            entry_full_name.focus()
+    
+    def cambiar_password_usuario(self, user_id):
+        """Ventana modal para cambiar contraseña de usuario"""
+        # Crear ventana modal
+        ventana_password = tk.Toplevel(self)
+        ventana_password.title("Cambiar Contraseña")
+        ventana_password.geometry("450x350")
+        ventana_password.configure(bg=self.color_fondo_ventana)
+        ventana_password.resizable(False, False)
+        ventana_password.transient(self)
+        ventana_password.grab_set()
+        
+        # Centrar ventana
+        ventana_password.update_idletasks()
+        x = (ventana_password.winfo_screenwidth() // 2) - (450 // 2)
+        y = (ventana_password.winfo_screenheight() // 2) - (350 // 2)
+        ventana_password.geometry(f"450x350+{x}+{y}")
+
+        # Obtener información del usuario
+        try:
+            usuarios = db.load_users()
+            usuario = next((u for u in usuarios if u['id'] == user_id), None)
+            if not usuario:
+                messagebox.showerror("Error", "Usuario no encontrado")
+                ventana_password.destroy()
+                return
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al cargar usuario: {str(e)}")
+            ventana_password.destroy()
+            return
+
+        # Frame de título
+        titulo_frame = tk.Frame(ventana_password, bg="#FF9800", relief="raised", bd=2)
+        titulo_frame.pack(fill="x")
+        tk.Label(titulo_frame, text="🔐 Cambiar Contraseña", font=("Impact", 16, "bold"), 
+                bg="#FF9800", fg="white", pady=15).pack()
+
+        # Información del usuario
+        info_frame = tk.Frame(ventana_password, bg=self.color_fondo_ventana)
+        info_frame.pack(pady=20)
+        tk.Label(info_frame, text=f"Usuario: {usuario['username']}", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).pack()
+
+        # Frame principal del formulario
+        form_frame = tk.Frame(ventana_password, bg=self.color_fondo_ventana)
+        form_frame.pack(pady=20, padx=40)
+
+        # Variables
+        var_nueva_password = tk.StringVar()
+        var_confirmar_password = tk.StringVar()
+
+        # Campo Nueva Contraseña
+        tk.Label(form_frame, text="🔑 Nueva Contraseña:", 
+                font=("Helvetica", 11, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=0, column=0, sticky="w", pady=(10, 5), padx=(0, 10))
+        entry_nueva = tk.Entry(form_frame, textvariable=var_nueva_password, show="*", width=30, font=("Helvetica", 11), 
+                              relief="solid", bd=2, bg="#FFFFFF")
+        entry_nueva.grid(row=0, column=1, pady=(10, 5), sticky="ew")
+
+        # Campo Confirmar Contraseña
+        tk.Label(form_frame, text="🔑 Confirmar Contraseña:", 
+                font=("Helvetica", 11, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=1, column=0, sticky="w", pady=(5, 10), padx=(0, 10))
+        entry_confirmar = tk.Entry(form_frame, textvariable=var_confirmar_password, show="*", width=30, font=("Helvetica", 11), 
+                                  relief="solid", bd=2, bg="#FFFFFF")
+        entry_confirmar.grid(row=1, column=1, pady=(5, 10), sticky="ew")
+
+        # Configurar grid
+        form_frame.grid_columnconfigure(1, weight=1)
+
+        # Información de seguridad
+        info_seguridad = tk.Label(ventana_password, text="💡 La contraseña debe tener al menos 6 caracteres", 
+                                 font=("Helvetica", 10, "italic"), bg=self.color_fondo_ventana, fg="#666666")
+        info_seguridad.pack(pady=(0, 20))
+
+        def confirmar_cambio():
+            nueva_password = var_nueva_password.get()
+            confirmar_password = var_confirmar_password.get()
+
+            # Validaciones
+            if not nueva_password:
+                messagebox.showerror("Error", "La nueva contraseña es obligatoria")
+                return
+            
+            if len(nueva_password) < 6:
+                messagebox.showerror("Error", "La contraseña debe tener al menos 6 caracteres")
+                return
+            
+            if nueva_password != confirmar_password:
+                messagebox.showerror("Error", "Las contraseñas no coinciden")
+                return
+
+            try:
+                db.change_user_password(user_id, nueva_password)
+                messagebox.showinfo("Éxito", "Contraseña actualizada exitosamente")
+                ventana_password.destroy()
+                self.actualizar_usuarios_desde_bd()  # Refrescar tabla
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo cambiar la contraseña: {str(e)}")
+
+        # Frame para botones
+        btn_frame = tk.Frame(ventana_password, bg=self.color_fondo_ventana)
+        btn_frame.pack(pady=20)
+
+        tk.Button(btn_frame, text="🔒 Cambiar Contraseña", command=confirmar_cambio,
+                  bg="#4CAF50", fg="white", font=("Helvetica", 11, "bold"),
+                  relief="raised", bd=2, padx=20, pady=8).pack(side="left", padx=10)
+        
+        tk.Button(btn_frame, text="❌ Cancelar", command=ventana_password.destroy,
+                  bg="#F44336", fg="white", font=("Helvetica", 11, "bold"),
+                  relief="raised", bd=2, padx=20, pady=8).pack(side="left", padx=10)
+
+        # Focus en el primer campo
+        entry_nueva.focus()
+
+    def sincronizar_datos_automaticamente(self):
+        """Sistema de sincronización automática de datos"""
+        # Solo sincronizar si hay una ventana activa y BD disponible
+        try:
+            # Refrescar datos según la ventana actual
+            if hasattr(self, 'ventana_actual'):
+                if self.ventana_actual == 'productos':
+                    self.actualizar_productos_desde_bd()
+                elif self.ventana_actual == 'carrito':
+                    self.actualizar_carrito_desde_bd()
+                elif self.ventana_actual == 'usuarios':
+                    self.actualizar_usuarios_desde_bd()
+                elif self.ventana_actual == 'ofertas':
+                    # Para ofertas necesitamos un parent, usamos None para que no falle
+                    pass
+                elif self.ventana_actual == 'reportes':
+                    self.actualizar_reportes_desde_bd()
+        except Exception as e:
+            print(f"Error en sincronización automática: {e}")
+        
+        # Programar próxima sincronización en 30 segundos
+        self.after(30000, self.sincronizar_datos_automaticamente)
+
+    def iniciar_sincronizacion_automatica(self):
+        """Iniciar el sistema de sincronización automática"""
+        # Marcar que se debe sincronizar automáticamente
+        self.sincronizacion_activa = True
+        # Iniciar el primer ciclo de sincronización
+        self.after(30000, self.sincronizar_datos_automaticamente)
+
+    def detener_sincronizacion_automatica(self):
+        """Detener la sincronización automática"""
+        self.sincronizacion_activa = False
+
+    def marcar_ventana_actual(self, nombre_ventana):
+        """Marcar cuál es la ventana actual para sincronización"""
+        self.ventana_actual = nombre_ventana
+
+    def actualizar_productos_desde_bd(self):
+        """Actualizar datos de productos desde BD"""
+        if hasattr(self, 'productos_tree'):
+            self.cargar_productos_en_tabla()
+
+    def actualizar_carrito_desde_bd(self):
+        """Actualizar datos del carrito desde BD"""
+        if hasattr(self, 'carrito_tree'):
+            self.cargar_datos_carrito()
+
+    def actualizar_reportes_desde_bd(self):
+        """Actualizar datos de reportes desde BD"""
+        if hasattr(self, 'reportes_tree'):
+            try:
+                # Recargar datos con los filtros actuales
+                self.aplicar_filtros_reportes()
+            except:
+                pass
 
     # --- 3. Formularios Internos (Ejemplo para Productos) ---
-    def mostrar_formulario_producto(self, titulo):
+    def mostrar_formulario_producto(self, modo, producto_id=None):
+        """Formulario mejorado para crear/editar productos con validaciones y mejor integración BD"""
         frame = self.limpiar_ventana()
-        ttk.Label(frame, text=titulo, style="Titulo.TLabel").pack(pady=(0, 20))
+        
+        # Título dinámico según el modo
+        titulo = "➕ Agregar Nuevo Producto" if modo == 'nueva' else "✏️ Editar Producto"
+        color_titulo = "#4CAF50" if modo == 'nueva' else "#FF9800"
+        
+        # Frame de título
+        titulo_frame = tk.Frame(frame, bg=color_titulo, relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+        tk.Label(titulo_frame, text=titulo, font=("Impact", 18, "bold"), 
+                bg=color_titulo, fg="white", pady=12).pack()
 
-        ttk.Label(frame, text="Nombre del Producto:", style="Subtitulo.TLabel").pack(anchor="w", padx=100)
-        ttk.Entry(frame, width=40).pack(pady=(0, 10))
+        # Frame principal del formulario con mejor diseño
+        form_container = tk.Frame(frame, bg=self.color_fondo_ventana, relief="raised", bd=2)
+        form_container.pack(pady=20, padx=50)
+        
+        form_frame = tk.Frame(form_container, bg=self.color_fondo_ventana)
+        form_frame.pack(padx=30, pady=30)
 
-        ttk.Label(frame, text="Descripción:", style="Subtitulo.TLabel").pack(anchor="w", padx=100)
-        ttk.Entry(frame, width=40).pack(pady=(0, 10))
+        # Variables del formulario
+        var_id = tk.StringVar()
+        var_nombre = tk.StringVar()
+        var_descripcion = tk.StringVar()
+        var_precio = tk.StringVar()
+        var_stock = tk.StringVar(value="50")  # Nuevo campo stock
 
-        ttk.Label(frame, text="Precio:", style="Subtitulo.TLabel").pack(anchor="w", padx=100)
-        ttk.Entry(frame, width=40).pack(pady=(0, 20))
+        # Función de validación en tiempo real
+        def validar_precio(*args):
+            precio = var_precio.get()
+            try:
+                if precio and float(precio) < 0:
+                    precio_label.config(fg="#F44336")
+                    precio_error.config(text="⚠️ El precio no puede ser negativo")
+                else:
+                    precio_label.config(fg=self.color_texto)
+                    precio_error.config(text="")
+            except ValueError:
+                if precio:  # Solo mostrar error si hay texto
+                    precio_label.config(fg="#F44336")
+                    precio_error.config(text="⚠️ Debe ser un número válido")
+                else:
+                    precio_label.config(fg=self.color_texto)
+                    precio_error.config(text="")
 
-        btn_frame = ttk.Frame(frame);
-        btn_frame.pack(pady=10)
-        tamaños = self.calcular_tamaños_responsivos()
-        ttk.Button(btn_frame, text="💾 Guardar", width=tamaños['boton_width']//2).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="❌ Cancelar", width=tamaños['boton_width']//2).pack(side="left", padx=5)
+        var_precio.trace("w", validar_precio)
 
-        ttk.Button(frame, text="⬅️ Atrás", command=self.mostrar_gestion_productos, width=tamaños['boton_width']).pack(pady=20)
+        # Campo ID
+        tk.Label(form_frame, text="🔢 ID del Producto (código único):", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=0, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        entry_id = tk.Entry(form_frame, textvariable=var_id, width=40, font=("Helvetica", 11), 
+                           relief="solid", bd=2, bg="#FFFFFF")
+        entry_id.grid(row=0, column=1, pady=(10, 2), sticky="ew")
+        
+        # Mensaje de ayuda para ID
+        tk.Label(form_frame, text="Ej: SUS06, ROLL01, etc.", font=("Helvetica", 9, "italic"), 
+                bg=self.color_fondo_ventana, fg="#666666").grid(row=1, column=1, sticky="w", pady=(0, 10))
+
+        # Campo Nombre
+        tk.Label(form_frame, text="🍣 Nombre del Producto:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=2, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        entry_nombre = tk.Entry(form_frame, textvariable=var_nombre, width=40, font=("Helvetica", 11), 
+                               relief="solid", bd=2, bg="#FFFFFF")
+        entry_nombre.grid(row=2, column=1, pady=(10, 2), sticky="ew")
+
+        # Campo Descripción con Text widget para mejor edición
+        tk.Label(form_frame, text="📝 Descripción:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=3, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        
+        desc_frame = tk.Frame(form_frame, bg=self.color_fondo_ventana)
+        desc_frame.grid(row=3, column=1, pady=(10, 2), sticky="ew")
+        
+        text_desc = tk.Text(desc_frame, width=30, height=3, font=("Helvetica", 11), 
+                           relief="solid", bd=2, bg="#FFFFFF", wrap="word")
+        text_desc.pack(side="left", fill="both", expand=True)
+        
+        desc_scroll = tk.Scrollbar(desc_frame, orient="vertical", command=text_desc.yview)
+        text_desc.configure(yscrollcommand=desc_scroll.set)
+        desc_scroll.pack(side="right", fill="y")
+
+        # Campo Precio con validación visual
+        precio_label = tk.Label(form_frame, text="💰 Precio ($):", 
+                               font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto)
+        precio_label.grid(row=4, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        
+        entry_precio = tk.Entry(form_frame, textvariable=var_precio, width=20, font=("Helvetica", 11), 
+                               relief="solid", bd=2, bg="#FFFFFF")
+        entry_precio.grid(row=4, column=1, pady=(10, 2), sticky="w")
+        
+        # Label para errores de precio
+        precio_error = tk.Label(form_frame, text="", font=("Helvetica", 9), 
+                               bg=self.color_fondo_ventana, fg="#F44336")
+        precio_error.grid(row=5, column=1, sticky="w")
+
+        # Campo Stock (nuevo)
+        tk.Label(form_frame, text="📦 Stock inicial:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=6, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        entry_stock = tk.Entry(form_frame, textvariable=var_stock, width=20, font=("Helvetica", 11), 
+                              relief="solid", bd=2, bg="#FFFFFF")
+        entry_stock.grid(row=6, column=1, pady=(10, 2), sticky="w")
+
+        # Campo Categoría (dropdown + entrada libre)
+        tk.Label(form_frame, text="📚 Categoría:", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg=self.color_texto).grid(row=7, column=0, sticky="w", pady=(10, 2), padx=(0, 10))
+        # Cargar categorías desde DB (fallback a lista por defecto si falla)
+        try:
+            categorias = db.load_categories() or ['Rolls', 'Especiales', 'Vegetarianos', 'Postres', 'Bebidas']
+        except Exception:
+            categorias = ['Rolls', 'Especiales', 'Vegetarianos', 'Postres', 'Bebidas']
+
+        var_categoria = tk.StringVar()
+        categoria_combo = ttk.Combobox(form_frame, textvariable=var_categoria, values=categorias, width=30)
+        categoria_combo.grid(row=7, column=1, pady=(10, 2), sticky="w")
+        categoria_combo.set(categorias[0])
+
+        # Permitir entrada libre como alternativa
+        tk.Label(form_frame, text="(Puedes escribir una categoría nueva si no está en la lista)", font=("Helvetica", 9, "italic"), bg=self.color_fondo_ventana, fg="#666666").grid(row=8, column=1, sticky="w")
+
+        # Configurar grid para que se expanda
+        form_frame.grid_columnconfigure(1, weight=1)
+
+        # Si es edición, cargar valores
+        if modo == 'editar' and producto_id:
+            try:
+                productos = db.load_products()
+                prod = next((p for p in productos if str(p.get('id')) == str(producto_id)), None)
+                if prod:
+                    var_id.set(prod.get('id', ''))
+                    entry_id.config(state='disabled')  # No permitir cambiar ID en edición
+                    var_nombre.set(prod.get('nombre', ''))
+                    text_desc.insert('1.0', prod.get('descripcion', ''))
+                    var_precio.set(str(prod.get('precio', '')))
+                    var_stock.set(str(prod.get('stock', 50)))
+                    try:
+                        var_categoria.set(prod.get('categoria', categorias[0] if categorias else 'general'))
+                    except Exception:
+                        pass
+                else:
+                    messagebox.showerror("Error", "No se encontró el producto en la base de datos")
+                    self.mostrar_gestion_productos()
+                    return
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al cargar datos del producto: {str(e)}")
+                self.mostrar_gestion_productos()
+                return
+
+        def guardar_producto():
+            # Obtener valores
+            pid = var_id.get().strip()
+            nombre = var_nombre.get().strip()
+            desc = text_desc.get('1.0', 'end-1c').strip()
+            precio_str = var_precio.get().strip()
+            stock_str = var_stock.get().strip()
+
+            # Validaciones mejoradas
+            errores = []
+            
+            if not pid:
+                errores.append("• ID es obligatorio")
+            elif modo == 'nueva':
+                # Verificar que el ID no exista ya
+                try:
+                    productos_existentes = db.load_products()
+                    if any(p.get('id') == pid for p in productos_existentes):
+                        errores.append(f"• El ID '{pid}' ya existe")
+                except Exception:
+                    pass
+            
+            if not nombre:
+                errores.append("• Nombre es obligatorio")
+            
+            if not precio_str:
+                errores.append("• Precio es obligatorio")
+            else:
+                try:
+                    precio_val = float(precio_str)
+                    if precio_val < 0:
+                        errores.append("• El precio no puede ser negativo")
+                except ValueError:
+                    errores.append("• El precio debe ser un número válido")
+            
+            if not stock_str:
+                errores.append("• Stock es obligatorio")
+            else:
+                try:
+                    stock_val = int(stock_str)
+                    if stock_val < 0:
+                        errores.append("• El stock no puede ser negativo")
+                except ValueError:
+                    errores.append("• El stock debe ser un número entero")
+
+            if errores:
+                messagebox.showerror("Errores de Validación", "Por favor corrige los siguientes errores:\n\n" + "\n".join(errores))
+                return
+
+            try:
+                precio_val = float(precio_str)
+                stock_val = int(stock_str)
+                
+                producto = {
+                    'id': pid, 
+                    'nombre': nombre, 
+                    'descripcion': desc, 
+                    'precio': precio_val,
+                    'stock': stock_val,
+                    'categoria': var_categoria.get() or 'general'
+                }
+                
+                # Guardar en base de datos
+                db.save_product(producto)
+                
+                accion = "creado" if modo == 'nueva' else "actualizado"
+                messagebox.showinfo("Éxito", f"Producto {accion} correctamente")
+                
+                # Regresar a gestión de productos
+                self.mostrar_gestion_productos()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo guardar el producto: {str(e)}")
+
+        # Frame para botones con mejor diseño
+        btn_frame = tk.Frame(form_container, bg=self.color_fondo_ventana)
+        btn_frame.pack(pady=(20, 30))
+
+        # Botones con colores y estilos mejorados
+        tk.Button(btn_frame, text="💾 Guardar Producto", command=guardar_producto,
+                  bg="#4CAF50", fg="white", font=("Helvetica", 12, "bold"),
+                  relief="raised", bd=2, padx=25, pady=10, width=20).pack(side="left", padx=10)
+        
+        tk.Button(btn_frame, text="❌ Cancelar", command=self.mostrar_gestion_productos,
+                  bg="#F44336", fg="white", font=("Helvetica", 12, "bold"),
+                  relief="raised", bd=2, padx=25, pady=10, width=20).pack(side="left", padx=10)
+
+        # Botón de ayuda
+        tk.Button(btn_frame, text="❓ Ayuda", 
+                  command=lambda: messagebox.showinfo("Ayuda", 
+                    "Consejos para llenar el formulario:\n\n"
+                    "• ID: Código único, ej: SUS06, ROLL01\n"
+                    "• Nombre: Nombre descriptivo del producto\n"
+                    "• Descripción: Ingredientes y características\n"
+                    "• Precio: Solo números, puede incluir decimales\n"
+                    "• Stock: Cantidad inicial disponible"),
+                  bg="#2196F3", fg="white", font=("Helvetica", 11, "bold"),
+                  relief="raised", bd=2, padx=15, pady=10).pack(side="left", padx=10)
+
+        # Focus en el primer campo editable
+        if modo == 'nueva':
+            entry_id.focus()
+        else:
+            entry_nombre.focus()
 
     def mostrar_reportes(self):
         """Sistema avanzado de reportes de ventas - VERSIÓN COMPLETAMENTE REDISEÑADA"""
@@ -1619,23 +3866,38 @@ Ctrl+R: Selector de Roles"""
         self.status_label.pack()
     
     def _crear_tab_resumen_ventas(self, parent):
-        """Crea la pestaña de resumen general de ventas"""
+        """Crea la pestaña de resumen general de ventas con datos reales de BD"""
         # Frame principal con mejor espaciado
         main_frame = tk.Frame(parent, bg=self.color_fondo_ventana)
         main_frame.pack(expand=True, fill="both", padx=20, pady=15)
         
-        # Calcular métricas generales
+        # Cargar datos reales desde la base de datos
+        try:
+            ventas_bd = db.load_orders()
+            if ventas_bd:
+                self.ventas = ventas_bd
+        except Exception as e:
+            print(f"Error al cargar ventas: {e}")
+        
+        # Calcular métricas generales desde datos reales
         total_ventas = len(self.ventas)
-        ingresos_totales = sum(venta['total_final'] for venta in self.ventas)
-        descuentos_totales = sum(venta['descuento_aplicado'] for venta in self.ventas)
+        ingresos_totales = sum(venta['total_final'] for venta in self.ventas) if self.ventas else 0
+        descuentos_totales = sum(venta['descuento_aplicado'] for venta in self.ventas) if self.ventas else 0
         
         # Frame para métricas principales con LabelFrame
-        metricas_frame = tk.LabelFrame(main_frame, text="📊 Métricas Principales", 
+        metricas_frame = tk.LabelFrame(main_frame, text="📊 Métricas Principales (Datos en Tiempo Real)", 
                                      font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, 
                                      fg=self.color_titulo, relief="ridge", bd=2, padx=15, pady=15)
         metricas_frame.pack(fill="x", pady=(0, 20))
         
-        # Métricas en tarjetas
+        # Botón de actualización de datos
+        actualizar_btn = tk.Button(metricas_frame, text="🔄 Actualizar desde BD", 
+                                  command=self.actualizar_datos_reportes,
+                                  bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"),
+                                  relief="raised", bd=2, padx=15, pady=5)
+        actualizar_btn.pack(anchor="ne", pady=(0, 10))
+        
+        # Métricas en tarjetas con datos reales
         metricas = [
             ("Total Ventas", str(total_ventas), "#4CAF50"),
             ("Ingresos", f"${ingresos_totales:,.2f}", "#2196F3"),
@@ -1656,8 +3918,29 @@ Ctrl+R: Selector de Roles"""
             tk.Label(metrica_frame, text=valor, font=("Helvetica", 16, "bold"), 
                     bg=color, fg="white").pack()
         
+        # Información adicional basada en datos reales
+        if total_ventas > 0:
+            # Producto más vendido
+            productos_vendidos = {}
+            for venta in self.ventas:
+                for producto in venta['productos']:
+                    nombre = producto['nombre']
+                    cantidad = producto['cantidad']
+                    productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + cantidad
+            
+            if productos_vendidos:
+                producto_top = max(productos_vendidos, key=lambda k: productos_vendidos[k])
+                cantidad_top = productos_vendidos[producto_top]
+                
+                info_adicional = tk.Frame(metricas_frame, bg="#E8F5E8", relief="sunken", bd=2)
+                info_adicional.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+                
+                tk.Label(info_adicional, text=f"🏆 Producto más vendido: {producto_top} ({cantidad_top} unidades)", 
+                        font=("Helvetica", 11, "bold"), bg="#E8F5E8", fg="#2E7D32", 
+                        padx=10, pady=8).pack()
+
         # Tabla detallada de ventas con LabelFrame
-        tabla_frame = tk.LabelFrame(main_frame, text="📋 Detalle de Ventas Recientes", 
+        tabla_frame = tk.LabelFrame(main_frame, text="📋 Detalle de Ventas Recientes (Base de Datos)", 
                                   font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, 
                                   fg=self.color_titulo, relief="ridge", bd=2, padx=15, pady=15)
         tabla_frame.pack(expand=True, fill="both")
@@ -1674,6 +3957,11 @@ Ctrl+R: Selector de Roles"""
         tk.Button(control_frame, text="📊 Ver Detalles", 
                  command=lambda: self.ver_detalle_venta_seleccionada(tree),
                  bg="#2196F3", fg="white", font=("Arial", 10, "bold"),
+                 padx=15, pady=5).pack(side="left", padx=5)
+        
+        tk.Button(control_frame, text="🗑️ Eliminar Venta", 
+                 command=lambda: self.eliminar_venta_seleccionada(tree),
+                 bg="#F44336", fg="white", font=("Arial", 10, "bold"),
                  padx=15, pady=5).pack(side="left", padx=5)
         
         # Crear tabla con scroll
@@ -1696,21 +3984,25 @@ Ctrl+R: Selector de Roles"""
             tree.heading(col, text=col)
             tree.column(col, width=ancho, anchor="center" if col in ["ID", "Descuento", "Total"] else "w")
         
-        # Llenar tabla con datos de ventas
-        for venta in sorted(self.ventas, key=lambda x: x['fecha'], reverse=True):
-            fecha_formateada = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
-            productos_texto = ", ".join([f"{p['nombre']} x{p['cantidad']}" for p in venta['productos']])
-            if len(productos_texto) > 30:
-                productos_texto = productos_texto[:27] + "..."
-            
-            oferta_texto = venta['oferta_aplicada'] if venta['oferta_aplicada'] else "Sin oferta"
-            descuento_texto = f"${venta['descuento_aplicado']:.2f}"
-            total_texto = f"${venta['total_final']:.2f}"
-            
-            tree.insert("", "end", values=(
-                venta['id'], fecha_formateada, productos_texto, 
-                oferta_texto, descuento_texto, total_texto
-            ))
+        # Llenar tabla con datos de ventas reales
+        for venta in sorted(self.ventas, key=lambda x: x['fecha'], reverse=True)[:50]:  # Últimas 50 ventas
+            try:
+                fecha_formateada = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                productos_texto = ", ".join([f"{p['nombre']} x{p['cantidad']}" for p in venta['productos']])
+                if len(productos_texto) > 30:
+                    productos_texto = productos_texto[:27] + "..."
+                
+                oferta_texto = venta['oferta_aplicada'] if venta['oferta_aplicada'] else "Sin oferta"
+                descuento_texto = f"${venta['descuento_aplicado']:.2f}"
+                total_texto = f"${venta['total_final']:.2f}"
+                
+                tree.insert("", "end", iid=venta['id'], values=(
+                    venta['id'], fecha_formateada, productos_texto, 
+                    oferta_texto, descuento_texto, total_texto
+                ))
+            except Exception as e:
+                print(f"Error al procesar venta {venta.get('id', 'unknown')}: {e}")
+                continue
         
         # Scrollbars
         scrollbar_v = ttk.Scrollbar(tabla_container, orient="vertical", command=tree.yview)
@@ -1720,6 +4012,182 @@ Ctrl+R: Selector de Roles"""
         tree.pack(side="left", fill="both", expand=True)
         scrollbar_v.pack(side="right", fill="y")
         scrollbar_h.pack(side="bottom", fill="x")
+    
+    def actualizar_datos_reportes(self):
+        """Actualiza los datos de reportes desde la base de datos"""
+        try:
+            # Recargar datos desde BD
+            ventas_bd = db.load_orders()
+            if ventas_bd:
+                self.ventas = ventas_bd
+            
+            ofertas_bd = db.load_offers()
+            if ofertas_bd:
+                self.ofertas = ofertas_bd
+            
+            messagebox.showinfo("Actualización", "Datos actualizados desde la base de datos")
+            
+            # Refrescar la vista actual de reportes
+            self.mostrar_reportes()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al actualizar datos: {str(e)}")
+    
+    def actualizar_tabla_ventas(self, tree):
+        """Actualiza la tabla de ventas con datos frescos de la BD"""
+        try:
+            # Limpiar tabla
+            for item in tree.get_children():
+                tree.delete(item)
+            
+            # Recargar desde BD
+            ventas_bd = db.load_orders()
+            if ventas_bd:
+                self.ventas = ventas_bd
+            
+            # Llenar tabla con datos actualizados
+            for venta in sorted(self.ventas, key=lambda x: x['fecha'], reverse=True)[:50]:
+                try:
+                    fecha_formateada = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                    productos_texto = ", ".join([f"{p['nombre']} x{p['cantidad']}" for p in venta['productos']])
+                    if len(productos_texto) > 30:
+                        productos_texto = productos_texto[:27] + "..."
+                    
+                    oferta_texto = venta['oferta_aplicada'] if venta['oferta_aplicada'] else "Sin oferta"
+                    descuento_texto = f"${venta['descuento_aplicado']:.2f}"
+                    total_texto = f"${venta['total_final']:.2f}"
+                    
+                    tree.insert("", "end", iid=venta['id'], values=(
+                        venta['id'], fecha_formateada, productos_texto, 
+                        oferta_texto, descuento_texto, total_texto
+                    ))
+                except Exception as e:
+                    print(f"Error al procesar venta: {e}")
+                    continue
+            
+            messagebox.showinfo("Actualización", "Tabla de ventas actualizada desde la base de datos")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al actualizar tabla: {str(e)}")
+    
+    def ver_detalle_venta_seleccionada(self, tree):
+        """Muestra el detalle completo de la venta seleccionada"""
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona una venta para ver detalles")
+            return
+        
+        venta_id = sel[0]
+        venta = next((v for v in self.ventas if v['id'] == venta_id), None)
+        
+        if not venta:
+            messagebox.showerror("Error", "No se encontró la venta seleccionada")
+            return
+        
+        # Crear ventana de detalles
+        detalle_window = tk.Toplevel(self)
+        detalle_window.title(f"Detalle de Venta - {venta_id}")
+        detalle_window.geometry("600x500")
+        detalle_window.configure(bg=self.color_fondo_ventana)
+        
+        # Título
+        tk.Label(detalle_window, text=f"📋 Detalle de Venta: {venta_id}", 
+                font=("Helvetica", 16, "bold"), bg=self.color_fondo_ventana, fg=self.color_titulo).pack(pady=20)
+        
+        # Frame para información general
+        info_frame = tk.LabelFrame(detalle_window, text="Información General", 
+                                  font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana)
+        info_frame.pack(fill="x", padx=20, pady=(0, 15))
+        
+        # Datos generales
+        tk.Label(info_frame, text=f"Fecha: {venta['fecha']}", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=2)
+        tk.Label(info_frame, text=f"Cajero: {venta['cajero']}", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=2)
+        tk.Label(info_frame, text=f"Método de pago: {venta['metodo_pago']}", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=2)
+        
+        # Frame para productos
+        productos_frame = tk.LabelFrame(detalle_window, text="Productos", 
+                                       font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana)
+        productos_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+        
+        # Tabla de productos
+        prod_tree = ttk.Treeview(productos_frame, columns=("Producto", "Cantidad", "Precio", "Subtotal"), 
+                                show="headings", height=8)
+        
+        for col in ["Producto", "Cantidad", "Precio", "Subtotal"]:
+            prod_tree.heading(col, text=col)
+            prod_tree.column(col, width=120, anchor="center" if col != "Producto" else "w")
+        
+        for producto in venta['productos']:
+            prod_tree.insert("", "end", values=(
+                producto['nombre'],
+                producto['cantidad'],
+                f"${producto['precio']:.2f}",
+                f"${producto['subtotal']:.2f}"
+            ))
+        
+        prod_tree.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Frame para totales
+        totales_frame = tk.LabelFrame(detalle_window, text="Resumen Financiero", 
+                                     font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana)
+        totales_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        tk.Label(totales_frame, text=f"Subtotal: ${venta['total_sin_descuento']:.2f}", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=2)
+        tk.Label(totales_frame, text=f"Descuento aplicado: ${venta['descuento_aplicado']:.2f}", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana, fg="#FF9800").pack(anchor="w", padx=10, pady=2)
+        tk.Label(totales_frame, text=f"TOTAL FINAL: ${venta['total_final']:.2f}", 
+                font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana, fg="#4CAF50").pack(anchor="w", padx=10, pady=5)
+        
+        if venta['oferta_aplicada']:
+            tk.Label(totales_frame, text=f"Oferta aplicada: {venta['oferta_aplicada']}", 
+                    font=("Helvetica", 11, "italic"), bg=self.color_fondo_ventana, fg="#2196F3").pack(anchor="w", padx=10, pady=2)
+        
+        # Botón cerrar
+        tk.Button(detalle_window, text="❌ Cerrar", command=detalle_window.destroy,
+                 bg="#9E9E9E", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8).pack(pady=15)
+    
+    def eliminar_venta_seleccionada(self, tree):
+        """Elimina la venta seleccionada de la base de datos"""
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Seleccionar", "Selecciona una venta para eliminar")
+            return
+        
+        venta_id = sel[0]
+        venta = next((v for v in self.ventas if v['id'] == venta_id), None)
+        
+        if not venta:
+            messagebox.showerror("Error", "No se encontró la venta seleccionada")
+            return
+        
+        # Confirmación detallada
+        confirmacion = messagebox.askyesno("Confirmar Eliminación", 
+                                          f"¿Estás seguro de eliminar la venta?\n\n"
+                                          f"ID: {venta_id}\n"
+                                          f"Fecha: {venta['fecha']}\n"
+                                          f"Total: ${venta['total_final']:.2f}\n\n"
+                                          f"Esta acción no se puede deshacer.")
+        
+        if confirmacion:
+            try:
+                # Eliminar de la lista en memoria
+                self.ventas = [v for v in self.ventas if v['id'] != venta_id]
+                
+                # Eliminar de la tabla visual
+                tree.delete(venta_id)
+                
+                # Nota: Aquí deberías agregar la función para eliminar de BD si existe
+                # db.delete_order(venta_id)
+                
+                messagebox.showinfo("Éxito", f"Venta {venta_id} eliminada correctamente")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al eliminar venta: {str(e)}")
     
     def _crear_tab_productos(self, parent):
         """Crea la pestaña de análisis por producto"""
@@ -1999,7 +4467,7 @@ Ctrl+R: Selector de Roles"""
             fecha_inicio = self.fecha_inicio.get()
             fecha_fin = self.fecha_fin.get()
             producto_filtro = self.filtro_producto.get()
-            pago_filtro = self.filtro_pago.get()
+            pago_filtro = self.filtro_pago.get() if hasattr(self, 'filtro_pago') else "Todos"
             
             # Validar fechas
             try:
@@ -2293,6 +4761,10 @@ Ctrl+R: Selector de Roles"""
             if not archivo_pdf:
                 return
                 
+            if not REPORTLAB_DISPONIBLE:
+                messagebox.showerror("Error", "ReportLab no está disponible. No se puede generar el PDF.")
+                return
+                
             # Crear el documento PDF
             doc = SimpleDocTemplate(archivo_pdf, pagesize=A4)
             elementos = []
@@ -2484,7 +4956,7 @@ Ctrl+R: Selector de Roles"""
             info_filtro = Paragraph(f"<b>Filtros aplicados:</b><br/>"
                                   f"• Período: {self.fecha_inicio.get()} - {self.fecha_fin.get()}<br/>"
                                   f"• Producto: {self.filtro_producto.get()}<br/>"
-                                  f"• Método de pago: {self.filtro_pago.get()}<br/>"
+                                  f"• Método de pago: {self.filtro_pago.get() if hasattr(self, 'filtro_pago') else 'Todos'}<br/>"
                                   f"• Resultados encontrados: {len(ventas_filtradas)} ventas", 
                                   estilos['Normal'])
             elementos.append(info_filtro)
@@ -2875,6 +5347,438 @@ Ctrl+R: Selector de Roles"""
             })
         
         return alertas
+    
+    # Funciones adicionales para gestión de datos y reportes
+    def backup_datos_reportes(self):
+        """Crea un respaldo completo de todos los datos"""
+        try:
+            # Obtener datos desde BD
+            productos = db.load_products()
+            ofertas = db.load_offers()
+            ventas = db.load_orders()
+            carrito = db.get_cart_items()
+            
+            # Crear estructura de respaldo
+            backup_data = {
+                'fecha_backup': datetime.datetime.now().isoformat(),
+                'version': '1.0',
+                'productos': productos,
+                'ofertas': ofertas,
+                'ventas': ventas,
+                'carrito': carrito,
+                'configuracion': {
+                    'tema_actual': self.tema_actual.get(),
+                    'rol_usuario': self.rol_usuario.get()
+                }
+            }
+            
+            # Seleccionar archivo de destino
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON backup files", "*.json"), ("All files", "*.*")],
+                title="Guardar respaldo de datos"
+            )
+            
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(backup_data, f, indent=2, ensure_ascii=False)
+                
+                # Mostrar estadísticas del backup
+                estadisticas = f"""✅ BACKUP COMPLETADO EXITOSAMENTE
+                
+📊 Datos respaldados:
+• Productos: {len(productos)}
+• Ofertas: {len(ofertas)}
+• Ventas: {len(ventas)}
+• Items en carrito: {len(carrito)}
+
+📁 Archivo: {os.path.basename(filename)}
+📅 Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+"""
+                messagebox.showinfo("Backup Completado", estadisticas)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al crear backup: {str(e)}")
+    
+    def restaurar_datos_reportes(self):
+        """Restaura datos desde un archivo de respaldo"""
+        # Confirmación de seguridad
+        if not messagebox.askyesno("Confirmar Restauración", 
+                                  "⚠️ ADVERTENCIA ⚠️\n\n"
+                                  "La restauración reemplazará TODOS los datos actuales.\n"
+                                  "Asegúrate de tener un backup reciente antes de continuar.\n\n"
+                                  "¿Deseas continuar con la restauración?"):
+            return
+        
+        try:
+            # Seleccionar archivo de backup
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON backup files", "*.json"), ("All files", "*.*")],
+                title="Seleccionar archivo de backup"
+            )
+            
+            if not filename:
+                return
+            
+            # Leer archivo de backup
+            with open(filename, 'r', encoding='utf-8') as f:
+                backup_data = json.load(f)
+            
+            # Validar estructura del backup
+            required_keys = ['productos', 'ofertas', 'ventas']
+            for key in required_keys:
+                if key not in backup_data:
+                    messagebox.showerror("Error", f"Archivo de backup inválido: falta '{key}'")
+                    return
+            
+            # Limpiar datos actuales
+            db.clear_cart()
+            
+            # Restaurar productos
+            for producto in backup_data['productos']:
+                db.save_product(producto)
+            
+            # Restaurar ofertas
+            for oferta in backup_data['ofertas']:
+                db.save_offer(oferta)
+            
+            # Restaurar ventas
+            for venta in backup_data['ventas']:
+                db.save_order(venta)
+            
+            # Actualizar datos en memoria
+            self.ofertas = backup_data['ofertas']
+            self.ventas = backup_data['ventas']
+            
+            # Mostrar estadísticas de restauración
+            fecha_backup = backup_data.get('fecha_backup', 'Desconocida')
+            estadisticas = f"""✅ RESTAURACIÓN COMPLETADA
+            
+📊 Datos restaurados:
+• Productos: {len(backup_data['productos'])}
+• Ofertas: {len(backup_data['ofertas'])}
+• Ventas: {len(backup_data['ventas'])}
+
+📅 Fecha del backup: {fecha_backup}
+"""
+            messagebox.showinfo("Restauración Completada", estadisticas)
+            
+            # Regresar al menú principal para refrescar la vista
+            self.mostrar_menu_principal()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al restaurar datos: {str(e)}")
+    
+    def generar_analisis_comparativo(self):
+        """Genera un análisis comparativo de períodos"""
+        # Ventana para seleccionar períodos
+        analisis_window = tk.Toplevel(self)
+        analisis_window.title("Análisis Comparativo de Períodos")
+        analisis_window.geometry("500x400")
+        analisis_window.configure(bg=self.color_fondo_ventana)
+        
+        # Título
+        tk.Label(analisis_window, text="📈 Análisis Comparativo", 
+                font=("Helvetica", 16, "bold"), bg=self.color_fondo_ventana, fg=self.color_titulo).pack(pady=20)
+        
+        # Frame para períodos
+        periodos_frame = tk.LabelFrame(analisis_window, text="Seleccionar Períodos", 
+                                      font=("Helvetica", 12, "bold"), bg=self.color_fondo_ventana)
+        periodos_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        # Período 1
+        tk.Label(periodos_frame, text="Período 1 (desde):", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=(10, 2))
+        periodo1_inicio = tk.Entry(periodos_frame, width=30)
+        periodo1_inicio.pack(anchor="w", padx=10)
+        periodo1_inicio.insert(0, "2025-09-01")
+        
+        tk.Label(periodos_frame, text="Período 1 (hasta):", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=(10, 2))
+        periodo1_fin = tk.Entry(periodos_frame, width=30)
+        periodo1_fin.pack(anchor="w", padx=10, pady=(0, 15))
+        periodo1_fin.insert(0, "2025-09-15")
+        
+        # Período 2
+        tk.Label(periodos_frame, text="Período 2 (desde):", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=(5, 2))
+        periodo2_inicio = tk.Entry(periodos_frame, width=30)
+        periodo2_inicio.pack(anchor="w", padx=10)
+        periodo2_inicio.insert(0, "2025-09-16")
+        
+        tk.Label(periodos_frame, text="Período 2 (hasta):", 
+                font=("Helvetica", 11), bg=self.color_fondo_ventana).pack(anchor="w", padx=10, pady=(10, 2))
+        periodo2_fin = tk.Entry(periodos_frame, width=30)
+        periodo2_fin.pack(anchor="w", padx=10, pady=(0, 15))
+        periodo2_fin.insert(0, "2025-09-30")
+        
+        def generar_analisis():
+            try:
+                # Obtener fechas
+                p1_inicio = datetime.datetime.strptime(periodo1_inicio.get(), "%Y-%m-%d")
+                p1_fin = datetime.datetime.strptime(periodo1_fin.get(), "%Y-%m-%d")
+                p2_inicio = datetime.datetime.strptime(periodo2_inicio.get(), "%Y-%m-%d")
+                p2_fin = datetime.datetime.strptime(periodo2_fin.get(), "%Y-%m-%d")
+                
+                # Filtrar ventas por períodos
+                ventas_p1 = []
+                ventas_p2 = []
+                
+                for venta in self.ventas:
+                    fecha_venta = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S')
+                    if p1_inicio <= fecha_venta <= p1_fin:
+                        ventas_p1.append(venta)
+                    elif p2_inicio <= fecha_venta <= p2_fin:
+                        ventas_p2.append(venta)
+                
+                # Calcular métricas
+                total_p1 = sum(v['total_final'] for v in ventas_p1)
+                total_p2 = sum(v['total_final'] for v in ventas_p2)
+                cantidad_p1 = len(ventas_p1)
+                cantidad_p2 = len(ventas_p2)
+                
+                # Calcular diferencias
+                diferencia_ingresos = total_p2 - total_p1
+                diferencia_cantidad = cantidad_p2 - cantidad_p1
+                porcentaje_ingresos = (diferencia_ingresos / total_p1 * 100) if total_p1 > 0 else 0
+                porcentaje_cantidad = (diferencia_cantidad / cantidad_p1 * 100) if cantidad_p1 > 0 else 0
+                
+                # Mostrar resultados
+                resultados = f"""📊 ANÁLISIS COMPARATIVO DE PERÍODOS
+
+📅 Período 1: {periodo1_inicio.get()} a {periodo1_fin.get()}
+• Ventas: {cantidad_p1}
+• Ingresos: ${total_p1:,.2f}
+• Promedio: ${total_p1/cantidad_p1:,.2f} por venta
+
+📅 Período 2: {periodo2_inicio.get()} a {periodo2_fin.get()}
+• Ventas: {cantidad_p2}
+• Ingresos: ${total_p2:,.2f}
+• Promedio: ${total_p2/cantidad_p2:,.2f} por venta
+
+📈 COMPARACIÓN:
+• Diferencia en ventas: {diferencia_cantidad:+d} ({porcentaje_cantidad:+.1f}%)
+• Diferencia en ingresos: ${diferencia_ingresos:+,.2f} ({porcentaje_ingresos:+.1f}%)
+
+{"📈 TENDENCIA POSITIVA" if diferencia_ingresos > 0 else "📉 TENDENCIA NEGATIVA" if diferencia_ingresos < 0 else "➡️ TENDENCIA ESTABLE"}
+"""
+                
+                messagebox.showinfo("Análisis Comparativo", resultados)
+                
+            except ValueError:
+                messagebox.showerror("Error", "Formato de fecha inválido. Use YYYY-MM-DD")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al generar análisis: {str(e)}")
+        
+        # Botones
+        btn_frame = tk.Frame(analisis_window, bg=self.color_fondo_ventana)
+        btn_frame.pack(pady=20)
+        
+        tk.Button(btn_frame, text="📊 Generar Análisis", command=generar_analisis,
+                 bg="#2196F3", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8).pack(side="left", padx=10)
+        
+        tk.Button(btn_frame, text="❌ Cerrar", command=analisis_window.destroy,
+                 bg="#9E9E9E", fg="white", font=("Helvetica", 11, "bold"),
+                 relief="raised", bd=2, padx=20, pady=8).pack(side="left", padx=10)
+    
+    def aplicar_filtros_reportes(self):
+        """Aplica los filtros seleccionados a los reportes (implementación mejorada)"""
+        try:
+            fecha_inicio = self.fecha_inicio.get()
+            fecha_fin = self.fecha_fin.get()
+            producto_filtro = self.filtro_producto.get()
+            
+            # Validar fechas
+            try:
+                fecha_inicio_dt = datetime.datetime.strptime(fecha_inicio, "%Y-%m-%d")
+                fecha_fin_dt = datetime.datetime.strptime(fecha_fin, "%Y-%m-%d")
+                if fecha_inicio_dt > fecha_fin_dt:
+                    messagebox.showwarning("Error de Fechas", "La fecha de inicio debe ser anterior a la fecha de fin")
+                    return
+            except ValueError:
+                messagebox.showerror("Error", "Formato de fecha inválido. Use YYYY-MM-DD")
+                return
+            
+            # Cargar datos frescos desde BD
+            ventas_bd = db.load_orders()
+            if ventas_bd:
+                self.ventas = ventas_bd
+            
+            # Filtrar ventas
+            ventas_filtradas = []
+            for venta in self.ventas:
+                try:
+                    fecha_venta = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S')
+                    fecha_venta_solo = fecha_venta.date()
+                    
+                    # Filtro por fecha
+                    if not (fecha_inicio_dt.date() <= fecha_venta_solo <= fecha_fin_dt.date()):
+                        continue
+                    
+                    # Filtro por producto
+                    if producto_filtro and producto_filtro.strip():
+                        productos_en_venta = [p['nombre'].lower() for p in venta['productos']]
+                        if not any(producto_filtro.lower() in prod for prod in productos_en_venta):
+                            continue
+                    
+                    ventas_filtradas.append(venta)
+                except Exception as e:
+                    print(f"Error al procesar venta {venta.get('id', 'unknown')}: {e}")
+                    continue
+            
+            # Actualizar ventas con filtros aplicados
+            self.ventas = ventas_filtradas
+            
+            # Refrescar reportes
+            self.mostrar_reportes()
+            
+            # Mostrar resultado del filtro
+            messagebox.showinfo("Filtros Aplicados", 
+                              f"Se encontraron {len(ventas_filtradas)} ventas que coinciden con los filtros:\n\n"
+                              f"• Período: {fecha_inicio} a {fecha_fin}\n"
+                              f"• Producto: {producto_filtro if producto_filtro else 'Todos'}")
+            
+            # Actualizar estado
+            self.status_label.config(text=f"✅ Filtros aplicados - {len(ventas_filtradas)} ventas mostradas")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al aplicar filtros: {str(e)}")
+    
+    def limpiar_filtros_reportes(self):
+        """Limpia todos los filtros y muestra todos los datos"""
+        try:
+            # Limpiar campos
+            self.fecha_inicio.delete(0, 'end')
+            self.fecha_inicio.insert(0, "2025-09-01")
+            
+            self.fecha_fin.delete(0, 'end')
+            self.fecha_fin.insert(0, "2025-12-31")
+            
+            self.filtro_producto.delete(0, 'end')
+            
+            # Recargar todos los datos desde BD
+            ventas_bd = db.load_orders()
+            if ventas_bd:
+                self.ventas = ventas_bd
+            
+            # Refrescar reportes
+            self.mostrar_reportes()
+            
+            messagebox.showinfo("Filtros Limpiados", "Se han limpiado todos los filtros y se muestran todos los datos")
+            
+            # Actualizar estado
+            self.status_label.config(text=f"✅ Filtros limpiados - {len(self.ventas)} ventas totales mostradas")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al limpiar filtros: {str(e)}")
+    
+    def exportar_reporte_pdf(self):
+        """Exporta el reporte actual a PDF"""
+        if not REPORTLAB_DISPONIBLE:
+            messagebox.showerror("Error", "ReportLab no está disponible. No se pueden generar PDFs.")
+            return
+        
+        try:
+            # Seleccionar archivo de destino
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                title="Exportar reporte a PDF"
+            )
+            
+            if not filename:
+                return
+            
+            # Crear documento PDF
+            doc = SimpleDocTemplate(filename, pagesize=A4)
+            elementos = []
+            
+            # Estilos
+            styles = getSampleStyleSheet()
+            titulo_style = ParagraphStyle(
+                'TituloCustom',
+                parent=styles['Heading1'],
+                fontSize=18,
+                spaceAfter=30,
+                alignment=1  # Centrado
+            )
+            
+            # Título
+            elementos.append(Paragraph("🍣 REPORTE DE VENTAS - MIZU SUSHI BAR", titulo_style))
+            elementos.append(Spacer(1, 20))
+            
+            # Información general
+            fecha_actual = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+            elementos.append(Paragraph(f"Fecha del reporte: {fecha_actual}", styles['Normal']))
+            elementos.append(Paragraph(f"Total de ventas analizadas: {len(self.ventas)}", styles['Normal']))
+            elementos.append(Spacer(1, 20))
+            
+            # Métricas principales
+            if self.ventas:
+                total_ventas = len(self.ventas)
+                ingresos_totales = sum(venta['total_final'] for venta in self.ventas)
+                descuentos_totales = sum(venta['descuento_aplicado'] for venta in self.ventas)
+                promedio = ingresos_totales / total_ventas
+                
+                metricas_data = [
+                    ['Métrica', 'Valor'],
+                    ['Total de ventas', str(total_ventas)],
+                    ['Ingresos totales', f'${ingresos_totales:,.2f}'],
+                    ['Descuentos otorgados', f'${descuentos_totales:,.2f}'],
+                    ['Promedio por venta', f'${promedio:,.2f}']
+                ]
+                
+                tabla_metricas = Table(metricas_data)
+                tabla_metricas.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 14),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                
+                elementos.append(Paragraph("📊 MÉTRICAS PRINCIPALES", styles['Heading2']))
+                elementos.append(tabla_metricas)
+                elementos.append(Spacer(1, 30))
+            
+            # Tabla de ventas recientes (últimas 20)
+            elementos.append(Paragraph("📋 VENTAS RECIENTES", styles['Heading2']))
+            
+            ventas_data = [['ID', 'Fecha', 'Total', 'Descuento']]
+            for venta in sorted(self.ventas, key=lambda x: x['fecha'], reverse=True)[:20]:
+                fecha_corta = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y')
+                ventas_data.append([
+                    venta['id'],
+                    fecha_corta,
+                    f"${venta['total_final']:.2f}",
+                    f"${venta['descuento_aplicado']:.2f}"
+                ])
+            
+            tabla_ventas = Table(ventas_data)
+            tabla_ventas.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            
+            elementos.append(tabla_ventas)
+            
+            # Construir PDF
+            doc.build(elementos)
+            
+            messagebox.showinfo("Exportación Exitosa", f"Reporte exportado exitosamente:\n{filename}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar PDF: {str(e)}")
 
     # --- 4. Opciones de Configuración ---
     def mostrar_configuracion(self):

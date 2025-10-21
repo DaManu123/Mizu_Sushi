@@ -1,0 +1,16 @@
+--- DESGLOSE DE PEDIDO ---
+ID Pedido: VTA011
+Fecha: 2025-10-20 15:37:50
+Cajero: Sistema
+Estado: Completado
+
+Productos:
+ - California Roll: 1 x $120.00 = $120.00
+
+Totales:
+Total sin descuento: $120.00
+Descuento aplicado: $0.00
+Total final: $120.00
+Método de pago: efectivo
+
+Gracias por su compra.
