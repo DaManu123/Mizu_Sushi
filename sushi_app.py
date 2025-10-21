@@ -3713,8 +3713,33 @@ Ctrl+R: Selector de Roles"""
     def actualizar_datos_reportes_seguro(self):
         """Actualiza los datos de reportes de manera segura"""
         try:
-            # Mostrar los reportes actualizados desde cero
-            self.mostrar_reportes()
+            # Recargar datos desde la base de datos
+            self.ventas = db.load_orders()
+            self.productos = db.load_products()
+            self.ofertas = db.load_offers()
+            
+            # Actualizar solo la pestaña activa si existe
+            if hasattr(self, 'reports_notebook'):
+                # Obtener la pestaña actualmente seleccionada
+                selected_tab = self.reports_notebook.select()
+                if selected_tab:
+                    # Limpiar y recrear solo el contenido de la pestaña seleccionada
+                    tab_widget = self.reports_notebook.nametowidget(selected_tab)
+                    for child in tab_widget.winfo_children():
+                        child.destroy()
+                    
+                    # Recrear el contenido según la pestaña
+                    tab_text = self.reports_notebook.tab(selected_tab, "text")
+                    if "Resumen" in tab_text:
+                        self._crear_tab_resumen_ventas(tab_widget)
+                    elif "Productos" in tab_text:
+                        self._crear_tab_productos(tab_widget)
+                    elif "Análisis" in tab_text:
+                        self._crear_tab_temporal(tab_widget)
+                    elif "Ofertas" in tab_text:
+                        self._crear_tab_ofertas(tab_widget)
+                    elif "Gestión" in tab_text:
+                        self._crear_tab_gestion_datos(tab_widget)
             
             # Mostrar mensaje de éxito
             messagebox.showinfo("Éxito", "Datos de reportes actualizados correctamente")
