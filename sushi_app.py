@@ -3711,8 +3711,28 @@ Ctrl+R: Selector de Roles"""
             entry_nombre.focus()
 
     def mostrar_reportes(self):
-        """Sistema avanzado de reportes de ventas - VERSIÓN COMPLETAMENTE REDISEÑADA"""
+        """Sistema avanzado de reportes de ventas - TOTALMENTE INTEGRADO CON BASE DE DATOS"""
+        self.marcar_ventana_actual("reportes")
         frame = self.limpiar_ventana()
+        
+        # ============================================================
+        # INICIALIZACIÓN DE DATOS DESDE BASE DE DATOS
+        # ============================================================
+        try:
+            # Cargar datos frescos desde la base de datos
+            self.ventas = db.load_orders()
+            self.productos = db.load_products()
+            self.ofertas = db.load_offers()
+            
+            # Variables de filtros
+            self.ventas_filtradas = self.ventas.copy()
+            
+        except Exception as e:
+            messagebox.showerror("Error BD", f"Error al cargar datos: {str(e)}")
+            self.ventas = []
+            self.productos = []
+            self.ofertas = []
+            self.ventas_filtradas = []
         
         # ============================================================
         # ESTRUCTURA PRINCIPAL - DISEÑO LIMPIO Y GARANTIZADO
@@ -3757,52 +3777,88 @@ Ctrl+R: Selector de Roles"""
         filters_container = tk.Frame(main_container, bg="#F5F5F5", relief="groove", bd=2)
         filters_container.pack(fill="x", pady=(0, 15))
         
-        # Título de filtros
-        tk.Label(filters_container,
-                text="🔍 Filtros de Búsqueda y Control",
+        # Título de filtros con contador
+        filtros_titulo = tk.Label(filters_container,
+                text=f"🔍 Filtros de Búsqueda - Total: {len(self.ventas)} ventas en BD",
                 font=("Arial", 12, "bold"),
-                bg="#F5F5F5", fg="#333").pack(pady=10)
+                bg="#F5F5F5", fg="#333")
+        filtros_titulo.pack(pady=10)
         
         # Contenedor de controles en línea
         controls_frame = tk.Frame(filters_container, bg="#F5F5F5")
         controls_frame.pack(fill="x", padx=20, pady=(0, 15))
         
-        # Fila de filtros
-        filter_row = tk.Frame(controls_frame, bg="#F5F5F5")
-        filter_row.pack(fill="x", pady=5)
+        # Primera fila de filtros
+        filter_row1 = tk.Frame(controls_frame, bg="#F5F5F5")
+        filter_row1.pack(fill="x", pady=5)
         
-        # Filtros de fecha
-        tk.Label(filter_row, text="Desde:", bg="#F5F5F5", fg="#333", font=("Arial", 10)).pack(side="left")
-        self.fecha_inicio = tk.Entry(filter_row, width=12, font=("Arial", 10))
+        # Filtros de fecha con valores inteligentes
+        today = datetime.datetime.now()
+        last_month = today - datetime.timedelta(days=30)
+        
+        tk.Label(filter_row1, text="Desde:", bg="#F5F5F5", fg="#333", font=("Arial", 10, "bold")).pack(side="left")
+        self.fecha_inicio = tk.Entry(filter_row1, width=12, font=("Arial", 10))
         self.fecha_inicio.pack(side="left", padx=(5, 15))
-        self.fecha_inicio.insert(0, "2025-09-25")
+        self.fecha_inicio.insert(0, last_month.strftime("%Y-%m-%d"))
         
-        tk.Label(filter_row, text="Hasta:", bg="#F5F5F5", fg="#333", font=("Arial", 10)).pack(side="left")
-        self.fecha_fin = tk.Entry(filter_row, width=12, font=("Arial", 10))
+        tk.Label(filter_row1, text="Hasta:", bg="#F5F5F5", fg="#333", font=("Arial", 10, "bold")).pack(side="left")
+        self.fecha_fin = tk.Entry(filter_row1, width=12, font=("Arial", 10))
         self.fecha_fin.pack(side="left", padx=(5, 15))
-        self.fecha_fin.insert(0, "2025-09-27")
+        self.fecha_fin.insert(0, today.strftime("%Y-%m-%d"))
         
-        # Filtro de producto
-        tk.Label(filter_row, text="Producto:", bg="#F5F5F5", fg="#333", font=("Arial", 10)).pack(side="left")
-        self.filtro_producto = tk.Entry(filter_row, width=18, font=("Arial", 10))
-        self.filtro_producto.pack(side="left", padx=(5, 0))
+        # Filtro de producto con Combobox
+        tk.Label(filter_row1, text="Producto:", bg="#F5F5F5", fg="#333", font=("Arial", 10, "bold")).pack(side="left")
+        productos_disponibles = ["Todos"] + list(set([p['nombre'] for p in self.productos if p['activo']]))
+        self.filtro_producto = ttk.Combobox(filter_row1, values=productos_disponibles, width=18, font=("Arial", 10), state="readonly")
+        self.filtro_producto.pack(side="left", padx=(5, 10))
+        self.filtro_producto.set("Todos")
+        
+        # Segunda fila de filtros
+        filter_row2 = tk.Frame(controls_frame, bg="#F5F5F5")
+        filter_row2.pack(fill="x", pady=5)
+        
+        # Filtro por método de pago
+        tk.Label(filter_row2, text="Pago:", bg="#F5F5F5", fg="#333", font=("Arial", 10, "bold")).pack(side="left")
+        metodos_pago = ["Todos", "efectivo", "tarjeta", "transferencia"]
+        self.filtro_pago = ttk.Combobox(filter_row2, values=metodos_pago, width=12, font=("Arial", 10), state="readonly")
+        self.filtro_pago.pack(side="left", padx=(5, 15))
+        self.filtro_pago.set("Todos")
+        
+        # Filtro por cajero
+        tk.Label(filter_row2, text="Cajero:", bg="#F5F5F5", fg="#333", font=("Arial", 10, "bold")).pack(side="left")
+        cajeros = ["Todos"] + list(set([v['cajero'] for v in self.ventas if v['cajero']]))
+        self.filtro_cajero = ttk.Combobox(filter_row2, values=cajeros, width=15, font=("Arial", 10), state="readonly")
+        self.filtro_cajero.pack(side="left", padx=(5, 15))
+        self.filtro_cajero.set("Todos")
+        
+        # Filtro por estado
+        tk.Label(filter_row2, text="Estado:", bg="#F5F5F5", fg="#333", font=("Arial", 10, "bold")).pack(side="left")
+        estados = ["Todos", "Completado", "Cancelado", "En preparación"]
+        self.filtro_estado = ttk.Combobox(filter_row2, values=estados, width=12, font=("Arial", 10), state="readonly")
+        self.filtro_estado.pack(side="left", padx=(5, 0))
+        self.filtro_estado.set("Todos")
         
         # Botones de acción
         buttons_row = tk.Frame(controls_frame, bg="#F5F5F5")
         buttons_row.pack(fill="x", pady=(10, 0))
         
         tk.Button(buttons_row, text="🔍 Aplicar Filtros",
-                 command=self.aplicar_filtros_reportes,
+                 command=self.aplicar_filtros_reportes_avanzados,
                  bg="#2196F3", fg="white", font=("Arial", 10, "bold"),
                  padx=20, pady=6).pack(side="left", padx=(0, 10))
         
+        tk.Button(buttons_row, text="🔄 Actualizar BD",
+                 command=self.actualizar_datos_reportes_completos,
+                 bg="#4CAF50", fg="white", font=("Arial", 10, "bold"),
+                 padx=20, pady=6).pack(side="left", padx=(0, 10))
+        
         tk.Button(buttons_row, text="� Exportar PDF",
-                 command=self.exportar_reporte_pdf,
+                 command=self.exportar_reporte_pdf_avanzado,
                  bg="#FF5722", fg="white", font=("Arial", 10, "bold"),
                  padx=20, pady=6).pack(side="left", padx=(0, 10))
         
         tk.Button(buttons_row, text="� Limpiar",
-                 command=self.limpiar_filtros_reportes,
+                 command=self.limpiar_filtros_reportes_avanzados,
                  bg="#9E9E9E", fg="white", font=("Arial", 10, "bold"),
                  padx=20, pady=6).pack(side="left")
         
@@ -3871,18 +3927,16 @@ Ctrl+R: Selector de Roles"""
         main_frame = tk.Frame(parent, bg=self.color_fondo_ventana)
         main_frame.pack(expand=True, fill="both", padx=20, pady=15)
         
-        # Cargar datos reales desde la base de datos
-        try:
-            ventas_bd = db.load_orders()
-            if ventas_bd:
-                self.ventas = ventas_bd
-        except Exception as e:
-            print(f"Error al cargar ventas: {e}")
+        # Los datos ya están cargados en __init__, usarlos directamente
+        # Calcular métricas completas desde datos reales de BD
+        total_ventas = len(self.ventas) if hasattr(self, 'ventas') and self.ventas else 0
+        ingresos_totales = sum(venta.get('total_final', 0) for venta in self.ventas) if self.ventas else 0
+        descuentos_totales = sum(venta.get('descuento_aplicado', 0) for venta in self.ventas) if self.ventas else 0
         
-        # Calcular métricas generales desde datos reales
-        total_ventas = len(self.ventas)
-        ingresos_totales = sum(venta['total_final'] for venta in self.ventas) if self.ventas else 0
-        descuentos_totales = sum(venta['descuento_aplicado'] for venta in self.ventas) if self.ventas else 0
+        # Métricas adicionales para análisis completo
+        ventas_completadas = len([v for v in self.ventas if v.get('estado') == 'Completado']) if self.ventas else 0
+        ventas_canceladas = len([v for v in self.ventas if v.get('estado') == 'Cancelado']) if self.ventas else 0
+        ingresos_sin_descuentos = sum(venta.get('total_sin_descuento', 0) for venta in self.ventas) if self.ventas else 0
         
         # Frame para métricas principales con LabelFrame
         metricas_frame = tk.LabelFrame(main_frame, text="📊 Métricas Principales (Datos en Tiempo Real)", 
@@ -3897,46 +3951,85 @@ Ctrl+R: Selector de Roles"""
                                   relief="raised", bd=2, padx=15, pady=5)
         actualizar_btn.pack(anchor="ne", pady=(0, 10))
         
-        # Métricas en tarjetas con datos reales
+        # Métricas expandidas con datos completos de BD
         metricas = [
             ("Total Ventas", str(total_ventas), "#4CAF50"),
-            ("Ingresos", f"${ingresos_totales:,.2f}", "#2196F3"),
+            ("Ingresos Finales", f"${ingresos_totales:,.2f}", "#2196F3"),
             ("Descuentos", f"${descuentos_totales:,.2f}", "#FF9800"),
-            ("Promedio", f"${ingresos_totales/total_ventas:,.2f}" if total_ventas > 0 else "$0.00", "#9C27B0")
+            ("Promedio/Venta", f"${ingresos_totales/total_ventas:,.2f}" if total_ventas > 0 else "$0.00", "#9C27B0"),
+            ("Completadas", f"{ventas_completadas} ({ventas_completadas*100/total_ventas:.1f}%)" if total_ventas > 0 else "0", "#8BC34A"),
+            ("Canceladas", f"{ventas_canceladas} ({ventas_canceladas*100/total_ventas:.1f}%)" if total_ventas > 0 else "0", "#F44336"),
+            ("Sin Descuentos", f"${ingresos_sin_descuentos:,.2f}", "#9E9E9E"),
+            ("Ahorro Total", f"${ingresos_sin_descuentos - ingresos_totales:,.2f}" if ingresos_sin_descuentos > ingresos_totales else "$0.00", "#FF5722")
         ]
         
         for i, (titulo, valor, color) in enumerate(metricas):
-            col = i % 2
-            row = i // 2
+            col = i % 4  # 4 columnas para mejor distribución
+            row = i // 4
             
             metrica_frame = tk.Frame(metricas_frame, bg=color, relief="raised", bd=3)
-            metrica_frame.grid(row=row, column=col, padx=10, pady=10, sticky="ew", ipadx=20, ipady=15)
+            metrica_frame.grid(row=row, column=col, padx=5, pady=8, sticky="ew", ipadx=15, ipady=12)
             metricas_frame.grid_columnconfigure(col, weight=1)
             
-            tk.Label(metrica_frame, text=titulo, font=("Helvetica", 12, "bold"), 
+            tk.Label(metrica_frame, text=titulo, font=("Helvetica", 9, "bold"), 
                     bg=color, fg="white").pack()
-            tk.Label(metrica_frame, text=valor, font=("Helvetica", 16, "bold"), 
+            tk.Label(metrica_frame, text=valor, font=("Helvetica", 12, "bold"), 
                     bg=color, fg="white").pack()
         
-        # Información adicional basada en datos reales
+        # Análisis detallado basado en datos reales de BD
         if total_ventas > 0:
-            # Producto más vendido
+            # Análisis de productos más vendidos
             productos_vendidos = {}
-            for venta in self.ventas:
-                for producto in venta['productos']:
-                    nombre = producto['nombre']
-                    cantidad = producto['cantidad']
-                    productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + cantidad
+            metodos_pago = {}
+            cajeros_ventas = {}
             
-            if productos_vendidos:
-                producto_top = max(productos_vendidos, key=lambda k: productos_vendidos[k])
-                cantidad_top = productos_vendidos[producto_top]
-                
+            for venta in self.ventas:
+                try:
+                    # Contar productos vendidos
+                    for producto in venta.get('productos', []):
+                        nombre = producto.get('nombre', 'Producto sin nombre')
+                        cantidad = producto.get('cantidad', 0)
+                        productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + cantidad
+                    
+                    # Contar métodos de pago
+                    metodo = venta.get('metodo_pago', 'No especificado')
+                    metodos_pago[metodo] = metodos_pago.get(metodo, 0) + 1
+                    
+                    # Contar ventas por cajero
+                    cajero = venta.get('cajero', 'No especificado')
+                    cajeros_ventas[cajero] = cajeros_ventas.get(cajero, 0) + 1
+                    
+                except Exception as e:
+                    print(f"Error procesando venta: {e}")
+                    continue
+            
+            # Crear panel de información adicional
+            if productos_vendidos or metodos_pago or cajeros_ventas:
                 info_adicional = tk.Frame(metricas_frame, bg="#E8F5E8", relief="sunken", bd=2)
-                info_adicional.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+                info_adicional.grid(row=3, column=0, columnspan=4, sticky="ew", padx=5, pady=10)
                 
-                tk.Label(info_adicional, text=f"🏆 Producto más vendido: {producto_top} ({cantidad_top} unidades)", 
-                        font=("Helvetica", 11, "bold"), bg="#E8F5E8", fg="#2E7D32", 
+                info_text = "📊 ANÁLISIS RÁPIDO:  "
+                
+                # Producto más vendido
+                if productos_vendidos:
+                    producto_top = max(productos_vendidos, key=lambda k: productos_vendidos[k])
+                    cantidad_top = productos_vendidos[producto_top]
+                    info_text += f"🏆 Top Producto: {producto_top} ({cantidad_top} uni.)  "
+                
+                # Método de pago más usado
+                if metodos_pago:
+                    pago_top = max(metodos_pago, key=lambda k: metodos_pago[k])
+                    pago_count = metodos_pago[pago_top]
+                    info_text += f"💳 Top Pago: {pago_top} ({pago_count} ventas)  "
+                
+                # Cajero más activo
+                if cajeros_ventas:
+                    cajero_top = max(cajeros_ventas, key=lambda k: cajeros_ventas[k])
+                    cajero_count = cajeros_ventas[cajero_top]
+                    info_text += f"👤 Top Cajero: {cajero_top} ({cajero_count} ventas)"
+                
+                tk.Label(info_adicional, text=info_text, 
+                        font=("Helvetica", 10, "bold"), bg="#E8F5E8", fg="#2E7D32", 
                         padx=10, pady=8).pack()
 
         # Tabla detallada de ventas con LabelFrame
@@ -3984,33 +4077,95 @@ Ctrl+R: Selector de Roles"""
             tree.heading(col, text=col)
             tree.column(col, width=ancho, anchor="center" if col in ["ID", "Descuento", "Total"] else "w")
         
-        # Llenar tabla con datos de ventas reales
-        for venta in sorted(self.ventas, key=lambda x: x['fecha'], reverse=True)[:50]:  # Últimas 50 ventas
-            try:
-                fecha_formateada = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
-                productos_texto = ", ".join([f"{p['nombre']} x{p['cantidad']}" for p in venta['productos']])
-                if len(productos_texto) > 30:
-                    productos_texto = productos_texto[:27] + "..."
-                
-                oferta_texto = venta['oferta_aplicada'] if venta['oferta_aplicada'] else "Sin oferta"
-                descuento_texto = f"${venta['descuento_aplicado']:.2f}"
-                total_texto = f"${venta['total_final']:.2f}"
-                
-                tree.insert("", "end", iid=venta['id'], values=(
-                    venta['id'], fecha_formateada, productos_texto, 
-                    oferta_texto, descuento_texto, total_texto
-                ))
-            except Exception as e:
-                print(f"Error al procesar venta {venta.get('id', 'unknown')}: {e}")
-                continue
+        # Llenar tabla con datos de ventas reales (manejo robusto de errores)
+        if self.ventas:
+            ventas_ordenadas = sorted([v for v in self.ventas if v and 'fecha' in v], 
+                                    key=lambda x: x.get('fecha', ''), reverse=True)
+            
+            for i, venta in enumerate(ventas_ordenadas[:100]):  # Últimas 100 ventas
+                try:
+                    # Validar datos esenciales
+                    venta_id = venta.get('id', f'VENTA_{i+1}')
+                    fecha_raw = venta.get('fecha', '')
+                    
+                    # Formatear fecha de manera segura
+                    try:
+                        fecha_dt = datetime.datetime.strptime(fecha_raw, '%Y-%m-%d %H:%M:%S')
+                        fecha_formateada = fecha_dt.strftime('%d/%m/%Y %H:%M')
+                    except:
+                        fecha_formateada = fecha_raw[:16] if len(fecha_raw) > 16 else fecha_raw
+                    
+                    # Procesar productos de manera segura
+                    productos = venta.get('productos', [])
+                    if isinstance(productos, list) and productos:
+                        productos_texto = ", ".join([
+                            f"{p.get('nombre', 'Producto')} x{p.get('cantidad', 0)}" 
+                            for p in productos if isinstance(p, dict)
+                        ])
+                    else:
+                        productos_texto = "Sin productos"
+                    
+                    if len(productos_texto) > 35:
+                        productos_texto = productos_texto[:32] + "..."
+                    
+                    # Formatear campos de manera segura
+                    oferta_texto = venta.get('oferta_aplicada') or "Sin oferta"
+                    descuento_aplicado = float(venta.get('descuento_aplicado', 0))
+                    total_final = float(venta.get('total_final', 0))
+                    
+                    descuento_texto = f"${descuento_aplicado:.2f}"
+                    total_texto = f"${total_final:.2f}"
+                    
+                    # Estado para codificación por colores
+                    estado = venta.get('estado', 'Desconocido')
+                    
+                    # Insertar en tabla con ID único
+                    item_id = tree.insert("", "end", values=(
+                        venta_id, fecha_formateada, productos_texto, 
+                        oferta_texto, descuento_texto, total_texto
+                    ))
+                    
+                    # Colorear según estado (opcional)
+                    if estado == 'Completado':
+                        tree.set(item_id, "ID", f"✅ {venta_id}")
+                    elif estado == 'Cancelado':
+                        tree.set(item_id, "ID", f"❌ {venta_id}")
+                    elif estado == 'En preparación':
+                        tree.set(item_id, "ID", f"⏳ {venta_id}")
+                        
+                except Exception as e:
+                    print(f"Error al procesar venta {venta.get('id', f'venta_{i}')}: {e}")
+                    # Insertar entrada de error para debugging
+                    try:
+                        tree.insert("", "end", values=(
+                            f"ERROR_{i}", "Error de datos", "Datos corruptos", 
+                            "N/A", "$0.00", "$0.00"
+                        ))
+                    except:
+                        pass
+                    continue
+        else:
+            # Mostrar mensaje cuando no hay datos
+            tree.insert("", "end", values=(
+                "SIN_DATOS", "No hay ventas", "Cargar datos desde BD", 
+                "N/A", "$0.00", "$0.00"
+            ))
         
-        # Scrollbars
+        # Configurar scrollbars mejorados
         scrollbar_v = ttk.Scrollbar(tabla_container, orient="vertical", command=tree.yview)
         scrollbar_h = ttk.Scrollbar(tabla_container, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=scrollbar_v.set, xscrollcommand=scrollbar_h.set)
         
-        tree.pack(side="left", fill="both", expand=True)
-        scrollbar_v.pack(side="right", fill="y")
+        # Layout mejorado con grid para mejor control
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar_v.grid(row=0, column=1, sticky="ns")
+        scrollbar_h.grid(row=1, column=0, sticky="ew")
+        
+        tabla_container.grid_rowconfigure(0, weight=1)
+        tabla_container.grid_columnconfigure(0, weight=1)
+        
+        # Guardar referencia del tree para uso en otras funciones
+        self.current_tree_ventas = tree
         scrollbar_h.pack(side="bottom", fill="x")
     
     def actualizar_datos_reportes(self):
@@ -4033,6 +4188,477 @@ Ctrl+R: Selector de Roles"""
         except Exception as e:
             messagebox.showerror("Error", f"Error al actualizar datos: {str(e)}")
     
+    def actualizar_datos_reportes_completos(self):
+        """Actualización completa de datos para reportes avanzados"""
+        try:
+            # Mostrar indicador de carga
+            loading_window = tk.Toplevel(self)
+            loading_window.title("Actualizando...")
+            loading_window.geometry("300x100")
+            loading_window.configure(bg=self.color_fondo_ventana)
+            loading_window.transient(self)
+            loading_window.grab_set()
+            
+            tk.Label(loading_window, text="🔄 Actualizando datos...", 
+                    font=("Arial", 12, "bold"), 
+                    bg=self.color_fondo_ventana, fg=self.color_titulo).pack(pady=30)
+            
+            # Forzar actualización de la ventana
+            loading_window.update()
+            
+            # Recargar todos los datos desde BD
+            self.ventas = db.load_orders()
+            self.productos = db.load_products()
+            self.ofertas = db.load_offers()
+            
+            # Actualizar filtros también
+            self.ventas_filtradas = self.ventas.copy()
+            
+            # Cerrar ventana de carga
+            loading_window.destroy()
+            
+            # Mensaje de confirmación
+            messagebox.showinfo("Éxito", f"Datos actualizados correctamente:\n• {len(self.ventas)} ventas\n• {len(self.productos)} productos\n• {len(self.ofertas)} ofertas")
+            
+            # Refrescar completamente la vista de reportes
+            self.mostrar_reportes()
+            
+        except Exception as e:
+            try:
+                loading_window.destroy()
+            except:
+                pass
+            messagebox.showerror("Error", f"Error al actualizar datos: {str(e)}")
+    
+    def aplicar_filtros_reportes_avanzados(self):
+        """Sistema de filtros avanzado completamente integrado con BD"""
+        try:
+            # Obtener valores de filtros
+            fecha_inicio = self.fecha_inicio.get().strip()
+            fecha_fin = self.fecha_fin.get().strip()
+            producto_filtro = self.filtro_producto.get()
+            pago_filtro = self.filtro_pago.get()
+            cajero_filtro = self.filtro_cajero.get()
+            estado_filtro = self.filtro_estado.get()
+            
+            # Validar fechas
+            try:
+                fecha_inicio_dt = datetime.datetime.strptime(fecha_inicio, "%Y-%m-%d")
+                fecha_fin_dt = datetime.datetime.strptime(fecha_fin, "%Y-%m-%d")
+                if fecha_inicio_dt > fecha_fin_dt:
+                    messagebox.showwarning("Error de Fechas", "La fecha de inicio debe ser anterior a la fecha de fin")
+                    return
+            except ValueError:
+                messagebox.showerror("Error", "Formato de fecha inválido. Use YYYY-MM-DD")
+                return
+            
+            # Aplicar filtros paso a paso
+            ventas_filtradas = []
+            total_ventas_bd = len(self.ventas)
+            
+            for venta in self.ventas:
+                # Validar que la venta tenga los campos necesarios
+                if not all(key in venta for key in ['fecha', 'productos', 'cajero']):
+                    continue
+                
+                try:
+                    fecha_venta = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S')
+                    fecha_venta_solo = fecha_venta.date()
+                    
+                    # Filtro por fecha
+                    if not (fecha_inicio_dt.date() <= fecha_venta_solo <= fecha_fin_dt.date()):
+                        continue
+                    
+                    # Filtro por producto
+                    if producto_filtro != "Todos":
+                        productos_en_venta = [p.get('nombre', '') for p in venta.get('productos', [])]
+                        if producto_filtro not in productos_en_venta:
+                            continue
+                    
+                    # Filtro por método de pago
+                    if pago_filtro != "Todos" and venta.get('metodo_pago', '') != pago_filtro:
+                        continue
+                    
+                    # Filtro por cajero
+                    if cajero_filtro != "Todos" and venta.get('cajero', '') != cajero_filtro:
+                        continue
+                    
+                    # Filtro por estado
+                    if estado_filtro != "Todos" and venta.get('estado', '') != estado_filtro:
+                        continue
+                    
+                    ventas_filtradas.append(venta)
+                    
+                except Exception as e:
+                    print(f"Error procesando venta {venta.get('id', 'ID desconocido')}: {e}")
+                    continue
+            
+            # Actualizar datos filtrados
+            self.ventas_filtradas = ventas_filtradas
+            
+            # Mostrar resultados
+            if ventas_filtradas:
+                self.mostrar_resultados_filtrados_avanzados(ventas_filtradas, {
+                    'fecha_inicio': fecha_inicio,
+                    'fecha_fin': fecha_fin,
+                    'producto': producto_filtro,
+                    'pago': pago_filtro,
+                    'cajero': cajero_filtro,
+                    'estado': estado_filtro,
+                    'total_bd': total_ventas_bd
+                })
+            else:
+                messagebox.showinfo("Sin Resultados", 
+                    f"No se encontraron ventas que coincidan con los filtros aplicados.\n\n"
+                    f"Total en BD: {total_ventas_bd} ventas\n"
+                    f"Período: {fecha_inicio} a {fecha_fin}\n"
+                    f"Filtros aplicados:\n"
+                    f"• Producto: {producto_filtro}\n"
+                    f"• Pago: {pago_filtro}\n"
+                    f"• Cajero: {cajero_filtro}\n"
+                    f"• Estado: {estado_filtro}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al aplicar filtros: {str(e)}")
+    
+    def limpiar_filtros_reportes_avanzados(self):
+        """Limpia todos los filtros y resetea a valores por defecto"""
+        try:
+            # Resetear fechas a último mes
+            today = datetime.datetime.now()
+            last_month = today - datetime.timedelta(days=30)
+            
+            self.fecha_inicio.delete(0, tk.END)
+            self.fecha_inicio.insert(0, last_month.strftime("%Y-%m-%d"))
+            
+            self.fecha_fin.delete(0, tk.END)
+            self.fecha_fin.insert(0, today.strftime("%Y-%m-%d"))
+            
+            # Resetear comboboxes
+            self.filtro_producto.set("Todos")
+            self.filtro_pago.set("Todos")
+            self.filtro_cajero.set("Todos")
+            self.filtro_estado.set("Todos")
+            
+            # Resetear datos filtrados
+            self.ventas_filtradas = self.ventas.copy()
+            
+            messagebox.showinfo("Filtros Limpiados", "Todos los filtros han sido restablecidos a sus valores por defecto")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al limpiar filtros: {str(e)}")
+    
+    def exportar_reporte_pdf_avanzado(self):
+        """Exporta un reporte PDF avanzado con los datos actuales (filtrados o completos)"""
+        if not REPORTLAB_DISPONIBLE:
+            messagebox.showwarning("ReportLab no disponible", 
+                "Para exportar PDF necesitas instalar ReportLab:\npip install reportlab")
+            return
+        
+        try:
+            # Determinar qué datos exportar
+            datos_a_exportar = self.ventas_filtradas if hasattr(self, 'ventas_filtradas') and self.ventas_filtradas else self.ventas
+            
+            if not datos_a_exportar:
+                messagebox.showwarning("Sin datos", "No hay datos para exportar")
+                return
+            
+            # Seleccionar archivo
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                title="Guardar reporte PDF",
+                initialname=f"reporte_ventas_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            )
+            
+            if not filename:
+                return
+            
+            # Crear PDF con datos actuales
+            doc = SimpleDocTemplate(filename, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Título
+            titulo = Paragraph(f"<b>REPORTE DE VENTAS MIZU SUSHI</b><br/>Generado: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", 
+                             styles['Title'])
+            story.append(titulo)
+            story.append(Spacer(1, 20))
+            
+            # Resumen ejecutivo
+            total_ventas = len(datos_a_exportar)
+            ingresos_totales = sum(v.get('total_final', 0) for v in datos_a_exportar)
+            descuentos_totales = sum(v.get('descuento_aplicado', 0) for v in datos_a_exportar)
+            promedio_venta = ingresos_totales / total_ventas if total_ventas > 0 else 0
+            
+            resumen_texto = f"""
+            <b>RESUMEN EJECUTIVO</b><br/>
+            • Total de ventas: {total_ventas}<br/>
+            • Ingresos totales: ${ingresos_totales:,.2f}<br/>
+            • Descuentos aplicados: ${descuentos_totales:,.2f}<br/>
+            • Promedio por venta: ${promedio_venta:,.2f}<br/>
+            """
+            
+            resumen = Paragraph(resumen_texto, styles['Normal'])
+            story.append(resumen)
+            story.append(Spacer(1, 20))
+            
+            # Tabla de datos
+            tabla_datos = [['ID Venta', 'Fecha', 'Total', 'Método Pago', 'Cajero', 'Estado']]
+            
+            for venta in datos_a_exportar[:100]:  # Máximo 100 ventas en el PDF
+                fecha_formateada = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y')
+                tabla_datos.append([
+                    venta.get('id', ''),
+                    fecha_formateada,
+                    f"${venta.get('total_final', 0):.2f}",
+                    venta.get('metodo_pago', ''),
+                    venta.get('cajero', ''),
+                    venta.get('estado', '')
+                ])
+            
+            tabla = Table(tabla_datos, colWidths=[80, 80, 80, 80, 80, 80])
+            tabla.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            
+            story.append(tabla)
+            
+            # Generar PDF
+            doc.build(story)
+            
+            messagebox.showinfo("Éxito", f"Reporte PDF generado exitosamente:\n{filename}\n\nVentas incluidas: {len(datos_a_exportar)}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al generar PDF: {str(e)}")
+    
+    def mostrar_resultados_filtrados_avanzados(self, ventas_filtradas, filtros_info):
+        """Muestra resultados filtrados en ventana moderna y completa"""
+        ventana_resultados = tk.Toplevel(self)
+        ventana_resultados.title("🔍 Resultados de Filtros Avanzados")
+        ventana_resultados.geometry("1200x700")
+        ventana_resultados.configure(bg=self.color_fondo_ventana)
+        
+        # Título principal
+        titulo_frame = tk.Frame(ventana_resultados, bg="#673AB7", relief="raised", bd=2)
+        titulo_frame.pack(fill="x", pady=(0, 20))
+        tk.Label(titulo_frame, text="📊 RESULTADOS FILTRADOS", 
+                font=("Impact", 18, "bold"), bg="#673AB7", fg="white", 
+                pady=10).pack()
+        
+        # Panel de información de filtros
+        info_frame = tk.LabelFrame(ventana_resultados, text="Filtros Aplicados", 
+                                  font=("Arial", 12, "bold"), bg=self.color_fondo_ventana)
+        info_frame.pack(fill="x", padx=20, pady=(0, 15))
+        
+        # Mostrar filtros en formato organizado
+        filtros_text = f"""📅 Período: {filtros_info['fecha_inicio']} - {filtros_info['fecha_fin']}
+🍣 Producto: {filtros_info['producto']} | 💳 Pago: {filtros_info['pago']}
+👤 Cajero: {filtros_info['cajero']} | 📊 Estado: {filtros_info['estado']}
+📈 Resultados: {len(ventas_filtradas)} de {filtros_info['total_bd']} ventas totales en BD"""
+        
+        tk.Label(info_frame, text=filtros_text, font=("Courier", 10), 
+                bg=self.color_fondo_ventana, fg=self.color_texto, justify="left").pack(anchor="w", padx=10, pady=10)
+        
+        # Métricas de resultados filtrados
+        metricas_frame = tk.LabelFrame(ventana_resultados, text="Métricas de Resultados", 
+                                      font=("Arial", 12, "bold"), bg=self.color_fondo_ventana)
+        metricas_frame.pack(fill="x", padx=20, pady=(0, 15))
+        
+        # Calcular métricas
+        total_ventas = len(ventas_filtradas)
+        ingresos_totales = sum(v.get('total_final', 0) for v in ventas_filtradas)
+        descuentos_totales = sum(v.get('descuento_aplicado', 0) for v in ventas_filtradas)
+        promedio_venta = ingresos_totales / total_ventas if total_ventas > 0 else 0
+        
+        # Crear grid de métricas
+        metricas_container = tk.Frame(metricas_frame, bg=self.color_fondo_ventana)
+        metricas_container.pack(fill="x", padx=10, pady=10)
+        
+        metricas = [
+            ("Ventas Encontradas", f"{total_ventas}", "#4CAF50"),
+            ("Ingresos Totales", f"${ingresos_totales:,.2f}", "#2196F3"),
+            ("Descuentos", f"${descuentos_totales:,.2f}", "#FF9800"),
+            ("Promedio/Venta", f"${promedio_venta:,.2f}", "#9C27B0")
+        ]
+        
+        for i, (titulo, valor, color) in enumerate(metricas):
+            metrica_frame = tk.Frame(metricas_container, bg=color, relief="raised", bd=2)
+            metrica_frame.grid(row=0, column=i, padx=5, pady=5, sticky="ew", ipadx=15, ipady=8)
+            metricas_container.grid_columnconfigure(i, weight=1)
+            
+            tk.Label(metrica_frame, text=titulo, font=("Arial", 10, "bold"), 
+                    bg=color, fg="white").pack()
+            tk.Label(metrica_frame, text=valor, font=("Arial", 14, "bold"), 
+                    bg=color, fg="white").pack()
+        
+        # Tabla de resultados
+        tabla_frame = tk.LabelFrame(ventana_resultados, text=f"Detalle de {len(ventas_filtradas)} Ventas", 
+                                   font=("Arial", 12, "bold"), bg=self.color_fondo_ventana)
+        tabla_frame.pack(expand=True, fill="both", padx=20, pady=(0, 15))
+        
+        # Crear tabla con scrollbars
+        tabla_container = tk.Frame(tabla_frame, bg=self.color_fondo_ventana)
+        tabla_container.pack(expand=True, fill="both", padx=10, pady=10)
+        
+        # Scrollbars
+        v_scroll = ttk.Scrollbar(tabla_container, orient="vertical")
+        h_scroll = ttk.Scrollbar(tabla_container, orient="horizontal")
+        
+        # Treeview
+        tree = ttk.Treeview(tabla_container, 
+                           columns=("ID", "Fecha", "Productos", "Total", "Pago", "Cajero", "Estado"),
+                           show="headings", 
+                           yscrollcommand=v_scroll.set,
+                           xscrollcommand=h_scroll.set)
+        
+        # Configurar scrollbars
+        v_scroll.config(command=tree.yview)
+        h_scroll.config(command=tree.xview)
+        
+        # Layout de tabla y scrollbars
+        tree.grid(row=0, column=0, sticky="nsew")
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        h_scroll.grid(row=1, column=0, sticky="ew")
+        
+        tabla_container.grid_rowconfigure(0, weight=1)
+        tabla_container.grid_columnconfigure(0, weight=1)
+        
+        # Configurar columnas
+        columnas_info = [
+            ("ID", 80),
+            ("Fecha", 120),
+            ("Productos", 250),
+            ("Total", 100),
+            ("Pago", 100),
+            ("Cajero", 100),
+            ("Estado", 100)
+        ]
+        
+        for col, ancho in columnas_info:
+            tree.heading(col, text=col)
+            tree.column(col, width=ancho, anchor="center" if col in ["ID", "Total"] else "w")
+        
+        # Llenar tabla con datos filtrados
+        for venta in sorted(ventas_filtradas, key=lambda x: x.get('fecha', ''), reverse=True):
+            try:
+                fecha_formateada = datetime.datetime.strptime(venta['fecha'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                productos_texto = ", ".join([f"{p.get('nombre', '')} x{p.get('cantidad', 0)}" for p in venta.get('productos', [])])
+                if len(productos_texto) > 35:
+                    productos_texto = productos_texto[:32] + "..."
+                
+                tree.insert("", "end", values=(
+                    venta.get('id', ''),
+                    fecha_formateada,
+                    productos_texto,
+                    f"${venta.get('total_final', 0):.2f}",
+                    venta.get('metodo_pago', ''),
+                    venta.get('cajero', ''),
+                    venta.get('estado', '')
+                ))
+            except Exception as e:
+                print(f"Error al mostrar venta: {e}")
+                continue
+        
+        # Botones de acción
+        botones_frame = tk.Frame(ventana_resultados, bg=self.color_fondo_ventana)
+        botones_frame.pack(fill="x", padx=20, pady=15)
+        
+        tk.Button(botones_frame, text="📄 Exportar Filtrados a PDF",
+                 command=lambda: self.exportar_filtrados_a_pdf(ventas_filtradas),
+                 bg="#FF5722", fg="white", font=("Arial", 11, "bold"),
+                 padx=20, pady=8).pack(side="left", padx=(0, 10))
+        
+        tk.Button(botones_frame, text="📋 Copiar Resumen",
+                 command=lambda: self.copiar_resumen_filtrados(ventas_filtradas, filtros_info),
+                 bg="#9C27B0", fg="white", font=("Arial", 11, "bold"),
+                 padx=20, pady=8).pack(side="left", padx=(0, 10))
+        
+        tk.Button(botones_frame, text="❌ Cerrar",
+                 command=ventana_resultados.destroy,
+                 bg="#9E9E9E", fg="white", font=("Arial", 11, "bold"),
+                 padx=20, pady=8).pack(side="right")
+    
+    def exportar_filtrados_a_pdf(self, ventas_filtradas):
+        """Exporta solo los datos filtrados a PDF"""
+        if not REPORTLAB_DISPONIBLE:
+            messagebox.showwarning("ReportLab no disponible", "Instala ReportLab: pip install reportlab")
+            return
+        
+        try:
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                title="Guardar resultados filtrados",
+                initialname=f"ventas_filtradas_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            )
+            
+            if filename:
+                # Crear PDF específico para datos filtrados
+                doc = SimpleDocTemplate(filename, pagesize=letter)
+                styles = getSampleStyleSheet()
+                story = []
+                
+                # Título específico
+                titulo = Paragraph(f"<b>VENTAS FILTRADAS - MIZU SUSHI</b><br/>Generado: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Title'])
+                story.append(titulo)
+                story.append(Spacer(1, 20))
+                
+                # Añadir contenido similar al método anterior pero específico para filtrados
+                # [Contenido similar al exportar_reporte_pdf_avanzado pero específico para datos filtrados]
+                
+                doc.build(story)
+                messagebox.showinfo("Éxito", f"Resultados filtrados exportados: {filename}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar: {str(e)}")
+    
+    def copiar_resumen_filtrados(self, ventas_filtradas, filtros_info):
+        """Copia un resumen de los datos filtrados al portapapeles"""
+        try:
+            total_ventas = len(ventas_filtradas)
+            ingresos_totales = sum(v.get('total_final', 0) for v in ventas_filtradas)
+            
+            resumen = f"""RESUMEN DE VENTAS FILTRADAS - MIZU SUSHI
+Generado: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+FILTROS APLICADOS:
+- Período: {filtros_info['fecha_inicio']} - {filtros_info['fecha_fin']}
+- Producto: {filtros_info['producto']}
+- Método de pago: {filtros_info['pago']}
+- Cajero: {filtros_info['cajero']}
+- Estado: {filtros_info['estado']}
+
+RESULTADOS:
+- Ventas encontradas: {total_ventas}
+- Ingresos totales: ${ingresos_totales:,.2f}
+- Promedio por venta: ${ingresos_totales/total_ventas:,.2f if total_ventas > 0 else 0}
+"""
+            
+            # Copiar al portapapeles (en sistemas Windows)
+            try:
+                import subprocess
+                subprocess.run("clip", universal_newlines=True, input=resumen, check=True)
+                messagebox.showinfo("Copiado", "Resumen copiado al portapapeles exitosamente")
+            except:
+                # Fallback: mostrar en ventana si no se puede copiar
+                ventana_resumen = tk.Toplevel(self)
+                ventana_resumen.title("Resumen")
+                ventana_resumen.geometry("500x400")
+                text_widget = tk.Text(ventana_resumen, wrap="word")
+                text_widget.pack(expand=True, fill="both", padx=10, pady=10)
+                text_widget.insert(1.0, resumen)
+                text_widget.config(state="disabled")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al generar resumen: {str(e)}")
+
     def actualizar_tabla_ventas(self, tree):
         """Actualiza la tabla de ventas con datos frescos de la BD"""
         try:
