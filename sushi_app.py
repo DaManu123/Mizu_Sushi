@@ -421,7 +421,7 @@ class SushiApp(tk.Tk):
                         f"Error: {error_msg}\n\n"
                         "Por favor verifique:\n"
                         "• Conexión a internet\n"
-                        "• Configuración del servidor PostgreSQL (192.168.1.82:5432)\n"
+                        "• Configuración del servidor PostgreSQL (toiletcrafters.us.to:5432)\n"
                         "• Credenciales de acceso (usuario: casaos)\n"
                         "• Estado del servidor de base de datos\n\n"
                         "La aplicación se cerrará.")
@@ -454,7 +454,7 @@ class SushiApp(tk.Tk):
                 bg=self.color_fondo_ventana,
                 fg=self.color_titulo).pack(pady=(10, 5))
         
-        tk.Label(frame_main, text="Servidor: 192.168.1.82:5432", 
+        tk.Label(frame_main, text="Servidor: toiletcrafters.us.to:5432", 
                 font=("Arial", 10), 
                 bg=self.color_fondo_ventana,
                 fg=self.color_texto).pack(pady=2)

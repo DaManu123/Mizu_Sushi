@@ -43,7 +43,7 @@ DB_CONFIG = {
     'dbname': "mizu_sushi",
     'user': "casaos", 
     'password': "casaos",
-    'host': "192.168.1.82",
+    'host': "toiletcrafters.us.to",
     'port': "5432"
 }
 ```
@@ -176,7 +176,7 @@ python setup_postgresql.py
 ## 🔍 **Verificaciones Realizadas**
 
 ### ✅ **Conexión PostgreSQL:**
-- Host: 192.168.1.82:5432 → **CONECTADO**
+- Host: toiletcrafters.us.to:5432 → **CONECTADO**
 - Base de datos: mizu_sushi → **ACCESIBLE**  
 - Usuario: casaos → **AUTENTICADO**
 - Versión: PostgreSQL 17.4 → **COMPATIBLE**

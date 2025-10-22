@@ -10,7 +10,7 @@ La aplicación **Mizu Sushi** ha sido completamente migrada de **SQLite local** 
 
 ### Servidor de Base de Datos
 ```
-Host: 192.168.1.82
+Host: toiletcrafters.us.to
 Puerto: 5432
 Base de Datos: mizu_sushi
 Usuario: casaos
@@ -25,7 +25,7 @@ DB_CONFIG = {
     'dbname': "mizu_sushi",      # Nombre de la base de datos
     'user': "casaos",            # Usuario PostgreSQL
     'password': "casaos",        # Contraseña
-    'host': "192.168.1.82",      # IP del servidor
+    'host': "toiletcrafters.us.to",      # IP del servidor
     'port': "5432"               # Puerto PostgreSQL
 }
 ```
@@ -197,8 +197,8 @@ usuarios = db.load_users()
 ```
 **Soluciones:**
 1. Verificar que PostgreSQL esté ejecutándose
-2. Comprobar IP: `ping 192.168.1.82`
-3. Verificar puerto: `telnet 192.168.1.82 5432`
+2. Comprobar IP: `ping toiletcrafters.us.to`
+3. Verificar puerto: `telnet toiletcrafters.us.to 5432`
 4. Revisar credenciales de usuario
 5. Confirmar que la base de datos existe
 
@@ -242,12 +242,12 @@ python backup_mizu_sushi.py
 
 ### Manual
 ```bash
-pg_dump -h 192.168.1.82 -U casaos -d mizu_sushi > respaldo.sql
+pg_dump -h toiletcrafters.us.to -U casaos -d mizu_sushi > respaldo.sql
 ```
 
 ### Restaurar
 ```bash
-psql -h 192.168.1.82 -U casaos -d mizu_sushi -f respaldo.sql
+psql -h toiletcrafters.us.to -U casaos -d mizu_sushi -f respaldo.sql
 ```
 
 ---

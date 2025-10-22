@@ -10,7 +10,7 @@ import os
 
 # Configuración
 DB_CONFIG = {
-    "host": "192.168.1.82",
+    "host": "toiletcrafters.us.to",
     "port": "5432", 
     "database": "mizu_sushi",
     "username": "casaos"

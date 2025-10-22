@@ -64,7 +64,7 @@ def main():
             'dbname': "mizu_sushi",
             'user': "casaos", 
             'password': "casaos",
-            'host': "192.168.1.82",
+            'host': "toiletcrafters.us.to",
             'port': "5432"
         }
         
@@ -88,7 +88,7 @@ def main():
         print(f"❌ Error de conexión PostgreSQL: {e}")
         print("\nVerifique:")
         print("• El servidor PostgreSQL está ejecutándose")
-        print("• La dirección IP es correcta (192.168.1.82)")
+        print("• La dirección IP es correcta (toiletcrafters.us.to)")
         print("• El puerto es correcto (5432)")
         print("• Las credenciales son correctas (usuario: casaos)")
         print("• La base de datos 'mizu_sushi' existe")
@@ -134,7 +134,7 @@ import os
 
 # Configuración
 DB_CONFIG = {
-    "host": "192.168.1.82",
+    "host": "toiletcrafters.us.to",
     "port": "5432", 
     "database": "mizu_sushi",
     "username": "casaos"

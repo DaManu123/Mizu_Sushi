@@ -13,7 +13,7 @@ DB_CONFIG = {
     'dbname': "mizu_sushi",
     'user': "casaos", 
     'password': "casaos",
-    'host': "192.168.1.82",
+    'host': "toiletcrafters.us.to",
     'port': "5432"
 }
 
