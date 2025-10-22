@@ -1,0 +1,16 @@
+--- DESGLOSE DE PEDIDO ---
+ID Pedido: VTA005
+Fecha: 2025-10-22 04:38:40
+Cajero: Sistema
+Estado: Pagado
+
+Productos:
+ - Salmon Roll: 2 x $180.00 = $360.00
+
+Totales:
+Total sin descuento: $360.00
+Descuento aplicado: $0.00
+Total final: $360.00
+Método de pago: efectivo
+
+Gracias por su compra.

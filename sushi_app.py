@@ -107,11 +107,8 @@ class SushiApp(tk.Tk):
         self.rol_usuario = tk.StringVar(value=ROL_ACTUAL)
         self.fondo_imagen = None
         
-        # Inicializar base de datos y cargar datos persistentes
-        try:
-            db.init_db()
-        except Exception:
-            pass
+        # Inicializar base de datos PostgreSQL con reintentos
+        self.init_database_connection()
 
         # Cargar ofertas desde la base de datos; si no hay datos, inicializar con muestras
         try:
@@ -396,6 +393,110 @@ class SushiApp(tk.Tk):
             except Exception as e:
                 print(f"Error al actualizar imagen de fondo con tema: {e}")
     
+    def init_database_connection(self):
+        """Inicializa conexión a PostgreSQL con reintentos y manejo de errores"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Mostrar ventana de conexión
+                self.show_connection_dialog()
+                
+                # Intentar inicialización de base de datos
+                db.init_db()
+                
+                messagebox.showinfo("✅ Conexión Exitosa", 
+                    "Conectado exitosamente a la base de datos PostgreSQL.\n"
+                    "La aplicación está lista para usar.")
+                break
+                
+            except Exception as e:
+                retry_count += 1
+                error_msg = str(e)
+                
+                if retry_count >= max_retries:
+                    messagebox.showerror("❌ Error de Conexión Crítico", 
+                        f"No se pudo conectar a la base de datos PostgreSQL después de {max_retries} intentos.\n\n"
+                        f"Error: {error_msg}\n\n"
+                        "Por favor verifique:\n"
+                        "• Conexión a internet\n"
+                        "• Configuración del servidor PostgreSQL (192.168.1.82:5432)\n"
+                        "• Credenciales de acceso (usuario: casaos)\n"
+                        "• Estado del servidor de base de datos\n\n"
+                        "La aplicación se cerrará.")
+                    self.quit()
+                else:
+                    retry = messagebox.askyesno("⚠️ Error de Conexión", 
+                        f"Error conectando a PostgreSQL:\n{error_msg}\n\n"
+                        f"¿Reintentar conexión? (Intento {retry_count}/{max_retries})")
+                    if not retry:
+                        self.quit()
+    
+    def show_connection_dialog(self):
+        """Muestra diálogo de conexión a base de datos"""
+        conn_window = tk.Toplevel(self)
+        conn_window.title("🔄 Conectando...")
+        conn_window.geometry("450x250")
+        conn_window.configure(bg=self.color_fondo_ventana)
+        conn_window.resizable(False, False)
+        
+        # Centrar ventana
+        conn_window.transient(self)
+        conn_window.grab_set()
+        
+        # Contenido del diálogo
+        frame_main = tk.Frame(conn_window, bg=self.color_fondo_ventana)
+        frame_main.pack(expand=True, fill='both', padx=20, pady=20)
+        
+        tk.Label(frame_main, text="🔄 Conectando a PostgreSQL", 
+                font=("Arial", 14, "bold"), 
+                bg=self.color_fondo_ventana,
+                fg=self.color_titulo).pack(pady=(10, 5))
+        
+        tk.Label(frame_main, text="Servidor: 192.168.1.82:5432", 
+                font=("Arial", 10), 
+                bg=self.color_fondo_ventana,
+                fg=self.color_texto).pack(pady=2)
+                
+        tk.Label(frame_main, text="Base de datos: mizu_sushi", 
+                font=("Arial", 10), 
+                bg=self.color_fondo_ventana,
+                fg=self.color_texto).pack(pady=2)
+                
+        tk.Label(frame_main, text="🔐 Estableciendo conexión segura...", 
+                font=("Arial", 10, "italic"), 
+                bg=self.color_fondo_ventana,
+                fg=self.color_texto).pack(pady=(15, 5))
+        
+        # Barra de progreso visual simple
+        progress_frame = tk.Frame(frame_main, bg=self.color_fondo_ventana)
+        progress_frame.pack(pady=10)
+        
+        progress_label = tk.Label(progress_frame, text="●●●", 
+                                 font=("Arial", 12), 
+                                 bg=self.color_fondo_ventana,
+                                 fg=self.color_titulo)
+        progress_label.pack()
+        
+        # Animar puntos de progreso
+        def animate_progress():
+            current = progress_label.cget('text')
+            if current == "●●●":
+                progress_label.config(text="○●●")
+            elif current == "○●●":
+                progress_label.config(text="○○●")
+            elif current == "○○●":
+                progress_label.config(text="○○○")
+            else:
+                progress_label.config(text="●●●")
+            conn_window.after(300, animate_progress)
+        
+        animate_progress()
+        
+        # Cerrar automáticamente después de 2 segundos
+        self.after(2000, conn_window.destroy)
+
     def obtener_colores_tema(self, nombre_tema):
         """Obtiene los colores de un tema específico para preview"""
         if nombre_tema == "Automatico":
